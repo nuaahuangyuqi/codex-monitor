@@ -5,8 +5,8 @@ ROOT="${0:A:h:h}"
 cd "$ROOT"
 
 APP_NAME="大同"
-VERSION="${APP_VERSION:-1.4.1}"
-BUILD_NUMBER="${APP_BUILD:-7}"
+VERSION="${APP_VERSION:-1.4.2}"
+BUILD_NUMBER="${APP_BUILD:-8}"
 ARM_SCRATCH="$ROOT/.build/release-arm64"
 X86_SCRATCH="$ROOT/.build/release-x86_64"
 

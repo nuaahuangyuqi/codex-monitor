@@ -129,7 +129,7 @@ struct DashboardView: View {
             }
 
             HStack(spacing: 10) {
-                if let selectedDate {
+                if selectedDate != nil {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 14) {
                             ForEach(selectedPoints) { point in

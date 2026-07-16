@@ -43,43 +43,17 @@ struct MenuBarView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(store.accounts) { account in
-                            HStack(alignment: .bottom, spacing: 10) {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    HStack(spacing: 7) {
-                                        Circle()
-                                            .fill(AppPalette.color(for: account.colorIndex))
-                                            .frame(width: 8, height: 8)
-                                        Text(account.name)
-                                            .font(.callout.weight(.medium))
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Text("剩余 \(Int(100 - quotaUsed(for: account)))%")
-                                            .font(.caption)
-                                            .monospacedDigit()
-                                    }
-                                    ProgressView(value: quotaUsed(for: account), total: 100)
-                                        .tint(quotaUsed(for: account) >= 85 ? .orange : AppPalette.color(for: account.colorIndex))
-                                }
-                                Button {
-                                    openCodex(account)
-                                } label: {
-                                    if launchingAccountID == account.id {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                            .frame(width: 74)
-                                    } else {
-                                        Text("打开 Codex")
-                                    }
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .disabled(launchingAccountID != nil)
-                                .help("用此账号打开 Codex")
-                            }
+                            MenuAccountQuotaRow(
+                                account: account,
+                                snapshot: dashboard.snapshots[account.id],
+                                isLaunching: launchingAccountID == account.id,
+                                isLaunchDisabled: launchingAccountID != nil,
+                                onOpenCodex: { openCodex(account) }
+                            )
                         }
                     }
                 }
-                .frame(maxHeight: 300)
+                .frame(maxHeight: 420)
             }
 
             Divider()
@@ -106,10 +80,6 @@ struct MenuBarView: View {
 
     private var snapshots: [AccountSnapshot] {
         store.accounts.compactMap { dashboard.snapshots[$0.id] }
-    }
-
-    private func quotaUsed(for account: AccountConfig) -> Double {
-        dashboard.snapshots[account.id]?.quotaUsedPercent ?? 0
     }
 
     private func openCodex(_ account: AccountConfig) {
@@ -147,5 +117,101 @@ struct MenuBarView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
+    }
+}
+
+private struct MenuAccountQuotaRow: View {
+    let account: AccountConfig
+    let snapshot: AccountSnapshot?
+    let isLaunching: Bool
+    let isLaunchDisabled: Bool
+    let onOpenCodex: () -> Void
+
+    private var usedPercent: Double {
+        min(max(snapshot?.quotaUsedPercent ?? 0, 0), 100)
+    }
+
+    private var tint: Color {
+        usedPercent >= 85 ? .orange : AppPalette.color(for: account.colorIndex)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(AppPalette.color(for: account.colorIndex))
+                    .frame(width: 8, height: 8)
+                Text(account.name)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Button(action: onOpenCodex) {
+                    if isLaunching {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 74)
+                    } else {
+                        Text("打开 Codex")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isLaunchDisabled)
+                .help("用此账号打开 Codex")
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(snapshot?.quotaName ?? "Codex 周额度")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("已用 \(Int(usedPercent))% · 剩余 \(Int(100 - usedPercent))%")
+                        .font(.caption.weight(.semibold))
+                        .monospacedDigit()
+                }
+
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(.secondary.opacity(0.18))
+                        Capsule()
+                            .fill(tint)
+                            .frame(width: proxy.size.width * CGFloat(usedPercent / 100))
+                    }
+                }
+                .frame(height: 8)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(snapshot?.quotaName ?? "Codex 周额度")
+                .accessibilityValue("已用 \(Int(usedPercent))%，剩余 \(Int(100 - usedPercent))%")
+
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    HStack {
+                        if let resetDate = snapshot?.quotaResetDate {
+                            Label("恢复：\(Formatters.countdown(to: resetDate, now: context.date))", systemImage: "clock")
+                        } else {
+                            Label("恢复时间暂无", systemImage: "clock")
+                        }
+                        Spacer()
+                        Text("官方实时额度")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            if let errorMessage = snapshot?.errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+            }
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(.separator.opacity(0.3), lineWidth: 1)
+        }
     }
 }
