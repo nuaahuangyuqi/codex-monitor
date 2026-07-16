@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 enum CodexAppServerError: LocalizedError {
@@ -11,7 +12,10 @@ enum CodexAppServerError: LocalizedError {
     case rpc(String)
     case notAuthenticated
     case loginFailed(String)
-    case historyMigrationFailed(String)
+    case credentialMissing
+    case credentialStoreUnsupported(String)
+    case nativeHomeRedirected(String)
+    case codexDidNotQuit
 
     var errorDescription: String? {
         switch self {
@@ -33,8 +37,14 @@ enum CodexAppServerError: LocalizedError {
             return "账号尚未完成 Codex 官方授权，请重新登录"
         case .loginFailed(let message):
             return message
-        case .historyMigrationFailed(let message):
-            return "合并 Codex 对话历史失败：\(message)"
+        case .credentialMissing:
+            return "该账号没有可用的 Codex 登录凭据，请重新授权"
+        case .credentialStoreUnsupported(let value):
+            return "Codex 当前使用 \(value) 凭据存储。一键切换需要在 ~/.codex/config.toml 中使用 cli_auth_credentials_store = \"file\"。"
+        case .nativeHomeRedirected(let value):
+            return "Codex 的 SQLite 状态被重定向到 \(value)。请删除 ~/.codex/config.toml 中的 sqlite_home 设置后再试。"
+        case .codexDidNotQuit:
+            return "Codex 未能完全退出。为避免账号和对话状态损坏，本次切换已取消。"
         }
     }
 }
@@ -98,61 +108,109 @@ indirect enum JSONValue: Codable, Sendable, Equatable {
     }
 }
 
-enum CodexAccountHome {
-    struct LegacyMigration {
-        let sourceAuth: URL
-        let destinationAuth: URL
+enum CodexCredentialVault {
+    private static let manager = FileManager.default
+
+    static func migrateLegacy(accounts: [AccountConfig]) {
+        guard let support = try? supportURL(create: true) else { return }
+        let accountsRoot = support.appendingPathComponent("Accounts", isDirectory: true)
+        let nativeAuth = try? Data(contentsOf: CodexNativeHome.authURL)
+        let nativeExternalID = nativeAuth.flatMap(externalAccountID)
+        var credentialsSecured = true
+
+        for account in accounts {
+            let accountRoot = accountsRoot.appendingPathComponent(account.id.uuidString, isDirectory: true)
+            let existing = try? load(accountID: account.id)
+            let candidate = legacyAuthData(accountRoot: accountRoot) ?? existing
+            let candidateExternalID = candidate.flatMap(externalAccountID)
+
+            let selected = (nativeExternalID != nil && nativeExternalID == candidateExternalID)
+                ? nativeAuth
+                : candidate
+            if let selected {
+                do { try save(selected, accountID: account.id) }
+                catch { credentialsSecured = false }
+            } else if manager.fileExists(atPath: accountRoot.path) {
+                credentialsSecured = false
+            }
+        }
+
+        // 旧 Accounts 目录是完整的隔离 CODEX_HOME。凭据导出后整体删除，
+        // 故意放弃其中独有的会话、SQLite、缓存和旧备份。
+        if credentialsSecured { try? manager.removeItem(at: accountsRoot) }
     }
 
-    static func url(for accountID: UUID, create: Bool = true) throws -> URL {
-        let support = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: create
-        )
-        let home = support
-            .appendingPathComponent("CodexMonitor/Accounts/\(accountID.uuidString)/CodexHome", isDirectory: true)
-        if create {
-            try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    static func save(_ data: Data, accountID: UUID) throws {
+        guard externalAccountID(from: data) != nil else {
+            throw CodexAppServerError.invalidResponse("账号凭据缺少 account_id")
         }
-        return home
+        let directory = try credentialsURL(create: true)
+        try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        try atomicWrite(data, to: directory.appendingPathComponent("\(accountID.uuidString).auth.json"))
+    }
+
+    static func load(accountID: UUID) throws -> Data {
+        let file = try credentialsURL(create: false)
+            .appendingPathComponent("\(accountID.uuidString).auth.json")
+        guard manager.fileExists(atPath: file.path) else { throw CodexAppServerError.credentialMissing }
+        let data = try Data(contentsOf: file)
+        guard externalAccountID(from: data) != nil else { throw CodexAppServerError.credentialMissing }
+        return data
     }
 
     static func delete(accountID: UUID) {
-        guard let support = try? FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: false
-        ) else { return }
-        try? FileManager.default.removeItem(
-            at: support.appendingPathComponent("CodexMonitor/Accounts/\(accountID.uuidString)")
-        )
+        guard let directory = try? credentialsURL(create: false) else { return }
+        try? manager.removeItem(at: directory.appendingPathComponent("\(accountID.uuidString).auth.json"))
     }
 
-    static func prepareLegacyMigration(accountID: UUID) throws -> LegacyMigration? {
-        let home = try url(for: accountID)
-        let destination = home.appendingPathComponent("auth.json")
-        guard !FileManager.default.fileExists(atPath: destination.path) else { return nil }
+    static func externalAccountID(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = object["tokens"] as? [String: Any] else { return nil }
+        return tokens["account_id"] as? String
+    }
 
-        let accountRoot = home.deletingLastPathComponent()
-        let legacyDirectory = accountRoot.appendingPathComponent("Quotio/auth", isDirectory: true)
-        guard let files = try? FileManager.default.contentsOfDirectory(at: legacyDirectory, includingPropertiesForKeys: nil),
-              let source = files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }).first(where: {
-                  $0.lastPathComponent.hasPrefix("codex-") && $0.pathExtension == "json"
-              }) else {
-            return nil
+    static func atomicWrite(_ data: Data, to destination: URL) throws {
+        let manager = FileManager.default
+        try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let temporary = destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).\(UUID().uuidString).tmp")
+        do {
+            try data.write(to: temporary, options: .withoutOverwriting)
+            try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
+            let handle = try FileHandle(forWritingTo: temporary)
+            try handle.synchronize()
+            try handle.close()
+            if rename(temporary.path, destination.path) != 0 {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        } catch {
+            try? manager.removeItem(at: temporary)
+            throw error
+        }
+    }
+
+    private static func legacyAuthData(accountRoot: URL) -> Data? {
+        let candidates = [
+            accountRoot.appendingPathComponent("CodexHome/auth.json"),
+            accountRoot.appendingPathComponent("auth.json")
+        ]
+        for candidate in candidates {
+            if let data = try? Data(contentsOf: candidate), externalAccountID(from: data) != nil {
+                return data
+            }
         }
 
-        let data = try Data(contentsOf: source)
-        guard let legacy = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let legacyDirectory = accountRoot.appendingPathComponent("Quotio/auth", isDirectory: true)
+        guard let files = try? manager.contentsOfDirectory(at: legacyDirectory, includingPropertiesForKeys: nil),
+              let source = files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }).first(where: {
+                  $0.lastPathComponent.hasPrefix("codex-") && $0.pathExtension == "json"
+              }),
+              let data = try? Data(contentsOf: source),
+              let legacy = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let idToken = legacy["id_token"] as? String,
               let accessToken = legacy["access_token"] as? String,
               let refreshToken = legacy["refresh_token"] as? String,
-              let accountID = legacy["account_id"] as? String else {
-            throw CodexAppServerError.invalidResponse("旧账号凭据不完整")
-        }
+              let externalID = legacy["account_id"] as? String else { return nil }
 
         let auth: [String: Any] = [
             "OPENAI_API_KEY": NSNull(),
@@ -161,22 +219,83 @@ enum CodexAccountHome {
                 "id_token": idToken,
                 "access_token": accessToken,
                 "refresh_token": refreshToken,
-                "account_id": accountID
+                "account_id": externalID
             ],
             "last_refresh": (legacy["last_refresh"] as? String) ?? ISO8601DateFormatter().string(from: .now)
         ]
-        let output = try JSONSerialization.data(withJSONObject: auth, options: [.prettyPrinted, .sortedKeys])
-        try output.write(to: destination, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
-        return LegacyMigration(sourceAuth: source, destinationAuth: destination)
+        return try? JSONSerialization.data(withJSONObject: auth, options: [.prettyPrinted, .sortedKeys])
     }
 
-    static func commit(_ migration: LegacyMigration) throws {
-        try FileManager.default.removeItem(at: migration.sourceAuth)
+    private static func supportURL(create: Bool) throws -> URL {
+        try manager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: create
+        ).appendingPathComponent("CodexMonitor", isDirectory: true)
     }
 
-    static func rollback(_ migration: LegacyMigration) {
-        try? FileManager.default.removeItem(at: migration.destinationAuth)
+    private static func credentialsURL(create: Bool) throws -> URL {
+        let directory = try supportURL(create: create).appendingPathComponent("Credentials", isDirectory: true)
+        if create { try manager.createDirectory(at: directory, withIntermediateDirectories: true) }
+        return directory
+    }
+}
+
+enum CodexNativeHome {
+    static let url = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".codex", isDirectory: true)
+    static let authURL = url.appendingPathComponent("auth.json")
+
+    static func validateConfiguration() throws {
+        let config = url.appendingPathComponent("config.toml")
+        guard let text = try? String(contentsOf: config, encoding: .utf8) else { return }
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.split(separator: "#", maxSplits: 1).first?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard let separator = line.firstIndex(of: "=") else { continue }
+            let key = line[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = line[line.index(after: separator)...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if key == "cli_auth_credentials_store", value != "file" {
+                throw CodexAppServerError.credentialStoreUnsupported(value)
+            }
+            if key == "sqlite_home" {
+                let redirected = URL(fileURLWithPath: NSString(string: value).expandingTildeInPath).standardizedFileURL
+                if redirected != url.standardizedFileURL {
+                    throw CodexAppServerError.nativeHomeRedirected(value)
+                }
+            }
+        }
+    }
+}
+
+struct CodexRuntimeHome: Sendable {
+    let url: URL
+
+    static func create(authData: Data? = nil) throws -> CodexRuntimeHome {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexMonitor", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+        try Data("cli_auth_credentials_store = \"file\"\n".utf8)
+            .write(to: root.appendingPathComponent("config.toml"), options: .atomic)
+        if let authData {
+            try CodexCredentialVault.atomicWrite(authData, to: root.appendingPathComponent("auth.json"))
+        }
+        return CodexRuntimeHome(url: root)
+    }
+
+    func persistCredential(accountID: UUID) throws {
+        let auth = url.appendingPathComponent("auth.json")
+        guard FileManager.default.fileExists(atPath: auth.path) else { throw CodexAppServerError.credentialMissing }
+        try CodexCredentialVault.save(Data(contentsOf: auth), accountID: accountID)
+    }
+
+    func remove() {
+        try? FileManager.default.removeItem(at: url)
     }
 }
 
@@ -193,300 +312,6 @@ enum CodexBinaryLocator {
         ]
         return candidates.first { manager.isExecutableFile(atPath: $0.path) }
     }
-}
-
-enum CodexConversationStore {
-    static func sharedHomeURL() -> URL {
-        if let configured = ProcessInfo.processInfo.environment["CODEX_SQLITE_HOME"], !configured.isEmpty {
-            return URL(fileURLWithPath: configured).standardizedFileURL
-        }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
-    }
-
-    static func prepareSharedHistory(accountHome: URL, sharedHome: URL) async throws {
-        do {
-            try await Task.detached(priority: .userInitiated) {
-                try prepareSynchronously(accountHome: accountHome, sharedHome: sharedHome)
-            }.value
-        } catch let error as CodexAppServerError {
-            throw error
-        } catch {
-            throw CodexAppServerError.historyMigrationFailed(error.localizedDescription)
-        }
-    }
-
-    private static func prepareSynchronously(accountHome: URL, sharedHome: URL) throws {
-        let manager = FileManager.default
-        try manager.createDirectory(at: sharedHome, withIntermediateDirectories: true)
-        try mergeDatabase(accountHome: accountHome, sharedHome: sharedHome)
-
-        var backupRoot: URL?
-        for name in historyDirectoryNames {
-            let source = accountHome.appendingPathComponent(name, isDirectory: true)
-            let target = sharedHome.appendingPathComponent(name, isDirectory: true)
-            try manager.createDirectory(at: target, withIntermediateDirectories: true)
-            try copyMissingFiles(from: source, to: target)
-        }
-        for name in historyFileNames {
-            try appendMissingJSONLines(
-                from: accountHome.appendingPathComponent(name),
-                to: sharedHome.appendingPathComponent(name),
-                accountHome: accountHome,
-                backupRoot: &backupRoot
-            )
-        }
-
-        for name in historyDirectoryNames {
-            try replaceWithSymlink(
-                at: accountHome.appendingPathComponent(name, isDirectory: true),
-                pointingTo: sharedHome.appendingPathComponent(name, isDirectory: true),
-                accountHome: accountHome,
-                backupRoot: &backupRoot
-            )
-        }
-        for name in historyFileNames {
-            try replaceWithSymlink(
-                at: accountHome.appendingPathComponent(name),
-                pointingTo: sharedHome.appendingPathComponent(name),
-                accountHome: accountHome,
-                backupRoot: &backupRoot
-            )
-        }
-
-        let sharedDatabase = sharedHome.appendingPathComponent("state_5.sqlite")
-        let accountDatabase = accountHome.appendingPathComponent("state_5.sqlite")
-        if manager.fileExists(atPath: sharedDatabase.path) {
-            for suffix in ["-shm", "-wal"] {
-                try moveToBackupIfPresent(
-                    accountHome.appendingPathComponent("state_5.sqlite\(suffix)"),
-                    accountHome: accountHome,
-                    backupRoot: &backupRoot
-                )
-            }
-            try replaceWithSymlink(
-                at: accountDatabase,
-                pointingTo: sharedDatabase,
-                accountHome: accountHome,
-                backupRoot: &backupRoot
-            )
-        }
-    }
-
-    private static func mergeDatabase(accountHome: URL, sharedHome: URL) throws {
-        let manager = FileManager.default
-        let source = accountHome.appendingPathComponent("state_5.sqlite")
-        let destination = sharedHome.appendingPathComponent("state_5.sqlite")
-        guard source.standardizedFileURL != destination.standardizedFileURL,
-              manager.fileExists(atPath: source.path),
-              manager.fileExists(atPath: destination.path),
-              !isSymlink(source, pointingTo: destination) else { return }
-
-        let sourcePath = sqlQuoted(source.path)
-        let countSQL = """
-        PRAGMA busy_timeout = 10000;
-        ATTACH DATABASE '\(sourcePath)' AS account_state;
-        SELECT COUNT(*)
-        FROM account_state.threads AS source
-        WHERE NOT EXISTS (SELECT 1 FROM main.threads AS target WHERE target.id = source.id);
-        """
-        let countText = try runSQLite(database: destination, command: countSQL)
-            .split(whereSeparator: \.isNewline)
-            .last
-            .map(String.init) ?? ""
-        guard let missingCount = Int(countText), missingCount > 0 else { return }
-
-        let backupDirectory = accountHome.appendingPathComponent("migration-backups", isDirectory: true)
-        try manager.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
-        try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: backupDirectory.path)
-        let stamp = backupFormatter.string(from: .now)
-        let backup = backupDirectory.appendingPathComponent("shared-state-before-merge-\(stamp)-\(UUID().uuidString.prefix(8)).sqlite")
-        _ = try runSQLite(database: destination, command: ".backup '\(sqlQuoted(backup.path))'")
-        try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
-
-        let mergeSQL = """
-        PRAGMA busy_timeout = 10000;
-        ATTACH DATABASE '\(sourcePath)' AS account_state;
-        BEGIN IMMEDIATE;
-        INSERT OR IGNORE INTO main.threads SELECT * FROM account_state.threads;
-        INSERT OR IGNORE INTO main.thread_dynamic_tools SELECT * FROM account_state.thread_dynamic_tools;
-        INSERT OR IGNORE INTO main.thread_spawn_edges SELECT * FROM account_state.thread_spawn_edges;
-        INSERT OR IGNORE INTO main.agent_jobs SELECT * FROM account_state.agent_jobs;
-        INSERT OR IGNORE INTO main.agent_job_items SELECT * FROM account_state.agent_job_items;
-        COMMIT;
-        """
-        _ = try runSQLite(database: destination, command: mergeSQL)
-    }
-
-    private static func copyMissingFiles(from source: URL, to target: URL) throws {
-        let manager = FileManager.default
-        guard manager.fileExists(atPath: source.path),
-              (try? manager.destinationOfSymbolicLink(atPath: source.path)) == nil,
-              let enumerator = manager.enumerator(
-                  at: source,
-                  includingPropertiesForKeys: [.isRegularFileKey],
-                  options: [.skipsHiddenFiles]
-              ) else { return }
-
-        for case let file as URL in enumerator {
-            let values = try file.resourceValues(forKeys: [.isRegularFileKey])
-            guard values.isRegularFile == true else { continue }
-            let sourceComponents = source.standardizedFileURL.pathComponents
-            let fileComponents = file.standardizedFileURL.pathComponents
-            let relativeComponents = fileComponents.dropFirst(sourceComponents.count)
-            let destination = relativeComponents.reduce(target) { partial, component in
-                partial.appendingPathComponent(component)
-            }
-            guard !manager.fileExists(atPath: destination.path) else { continue }
-            try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try manager.copyItem(at: file, to: destination)
-        }
-    }
-
-    private static func appendMissingJSONLines(
-        from source: URL,
-        to target: URL,
-        accountHome: URL,
-        backupRoot: inout URL?
-    ) throws {
-        let manager = FileManager.default
-        guard manager.fileExists(atPath: source.path),
-              (try? manager.destinationOfSymbolicLink(atPath: source.path)) == nil else { return }
-        if !manager.fileExists(atPath: target.path) {
-            try manager.copyItem(at: source, to: target)
-            return
-        }
-
-        let targetText = try String(contentsOf: target, encoding: .utf8)
-        let sourceText = try String(contentsOf: source, encoding: .utf8)
-        var knownIDs = Set(targetText.split(whereSeparator: \.isNewline).compactMap(jsonLineID))
-        var additions: [String] = []
-        for line in sourceText.split(whereSeparator: \.isNewline) {
-            guard let id = jsonLineID(line), knownIDs.insert(id).inserted else { continue }
-            additions.append(String(line))
-        }
-        guard !additions.isEmpty else { return }
-
-        let backup = try ensureBackupRoot(accountHome: accountHome, backupRoot: &backupRoot)
-            .appendingPathComponent("shared-before-link", isDirectory: true)
-            .appendingPathComponent(target.lastPathComponent)
-        try manager.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try manager.copyItem(at: target, to: backup)
-        var merged = targetText
-        if !merged.isEmpty, !merged.hasSuffix("\n") { merged.append("\n") }
-        merged.append(additions.joined(separator: "\n"))
-        merged.append("\n")
-        try Data(merged.utf8).write(to: target, options: .atomic)
-    }
-
-    private static func jsonLineID(_ line: Substring) -> String? {
-        guard let data = String(line).data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        return (object["id"] as? String) ?? (object["session_id"] as? String)
-    }
-
-    private static func replaceWithSymlink(
-        at source: URL,
-        pointingTo target: URL,
-        accountHome: URL,
-        backupRoot: inout URL?
-    ) throws {
-        let manager = FileManager.default
-        if isSymlink(source, pointingTo: target) { return }
-        let existingLink = try? manager.destinationOfSymbolicLink(atPath: source.path)
-        if manager.fileExists(atPath: source.path) || existingLink != nil {
-            let backup = try ensureBackupRoot(accountHome: accountHome, backupRoot: &backupRoot)
-                .appendingPathComponent("profile-history", isDirectory: true)
-                .appendingPathComponent(source.lastPathComponent)
-            try manager.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try manager.moveItem(at: source, to: backup)
-        }
-        try manager.createSymbolicLink(atPath: source.path, withDestinationPath: target.path)
-    }
-
-    private static func moveToBackupIfPresent(
-        _ source: URL,
-        accountHome: URL,
-        backupRoot: inout URL?
-    ) throws {
-        let manager = FileManager.default
-        guard manager.fileExists(atPath: source.path) else { return }
-        let backup = try ensureBackupRoot(accountHome: accountHome, backupRoot: &backupRoot)
-            .appendingPathComponent("profile-history", isDirectory: true)
-            .appendingPathComponent(source.lastPathComponent)
-        try manager.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try manager.moveItem(at: source, to: backup)
-    }
-
-    private static func ensureBackupRoot(accountHome: URL, backupRoot: inout URL?) throws -> URL {
-        if let backupRoot { return backupRoot }
-        let root = accountHome
-            .appendingPathComponent("migration-backups", isDirectory: true)
-            .appendingPathComponent(
-                "shared-history-\(backupFormatter.string(from: .now))-\(UUID().uuidString.prefix(8))",
-                isDirectory: true
-            )
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
-        backupRoot = root
-        return root
-    }
-
-    private static func isSymlink(_ source: URL, pointingTo target: URL) -> Bool {
-        guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: source.path) else { return false }
-        let destinationURL = destination.hasPrefix("/")
-            ? URL(fileURLWithPath: destination)
-            : source.deletingLastPathComponent().appendingPathComponent(destination)
-        return destinationURL.standardizedFileURL == target.standardizedFileURL
-    }
-
-    private static func runSQLite(database: URL, command: String) throws -> String {
-        let executable = URL(fileURLWithPath: "/usr/bin/sqlite3")
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            throw CodexAppServerError.historyMigrationFailed("系统缺少 sqlite3")
-        }
-        let process = Process()
-        let output = Pipe()
-        let errors = Pipe()
-        process.executableURL = executable
-        process.arguments = [database.path, command]
-        process.standardOutput = output
-        process.standardError = errors
-        do { try process.run() }
-        catch { throw CodexAppServerError.historyMigrationFailed(error.localizedDescription) }
-        process.waitUntilExit()
-        let outputData = output.fileHandleForReading.readDataToEndOfFile()
-        let errorData = errors.fileHandleForReading.readDataToEndOfFile()
-        guard process.terminationStatus == 0 else {
-            let message = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            throw CodexAppServerError.historyMigrationFailed(message?.isEmpty == false ? message! : "sqlite3 返回 \(process.terminationStatus)")
-        }
-        return String(data: outputData, encoding: .utf8) ?? ""
-    }
-
-    private static func sqlQuoted(_ value: String) -> String {
-        value.replacingOccurrences(of: "'", with: "''")
-    }
-
-    private static let historyDirectoryNames = [
-        "sessions",
-        "archived_sessions",
-        "attachments",
-        "generated_images"
-    ]
-
-    private static let historyFileNames = [
-        "session_index.jsonl",
-        "history.jsonl",
-        "transcription-history.jsonl"
-    ]
-
-    private static let backupFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return formatter
-    }()
 }
 
 actor CodexAppServerClient {
@@ -506,8 +331,8 @@ actor CodexAppServerClient {
         self.homeURL = homeURL
     }
 
-    static func start(accountID: UUID) async throws -> CodexAppServerClient {
-        let client = CodexAppServerClient(homeURL: try CodexAccountHome.url(for: accountID))
+    static func start(homeURL: URL) async throws -> CodexAppServerClient {
+        let client = CodexAppServerClient(homeURL: homeURL)
         do {
             try await client.launch()
             return client
@@ -648,6 +473,7 @@ actor CodexAppServerClient {
 actor CodexOAuthSession {
     private let accountID: UUID
     private var client: CodexAppServerClient?
+    private var runtime: CodexRuntimeHome?
     private var activeURL: URL?
     private var loginID: String?
 
@@ -657,7 +483,14 @@ actor CodexOAuthSession {
 
     func start() async throws {
         guard client == nil else { return }
-        client = try await CodexAppServerClient.start(accountID: accountID)
+        let runtime = try CodexRuntimeHome.create()
+        do {
+            client = try await CodexAppServerClient.start(homeURL: runtime.url)
+            self.runtime = runtime
+        } catch {
+            runtime.remove()
+            throw error
+        }
     }
 
     func loginWithChatGPT() async throws -> CodexAccountResult {
@@ -686,6 +519,16 @@ actor CodexOAuthSession {
         self.loginID = nil
         await client.stop()
         self.client = nil
+        guard let runtime else { throw CodexAppServerError.credentialMissing }
+        do {
+            try await CodexAccountCoordinator.shared.importCredential(from: runtime, accountID: accountID)
+            runtime.remove()
+            self.runtime = nil
+        } catch {
+            runtime.remove()
+            self.runtime = nil
+            throw error
+        }
         return try await CodexAccountService.refresh(accountID: accountID)
     }
 
@@ -703,21 +546,81 @@ actor CodexOAuthSession {
     }
 
     func stop() async {
-        guard let client else { return }
-        self.client = nil
-        await client.stop()
+        if let client {
+            self.client = nil
+            await client.stop()
+        }
+        runtime?.remove()
+        runtime = nil
     }
 }
 
-enum CodexAccountService {
-    static func refresh(accountID: UUID) async throws -> CodexAccountResult {
-        let migration = try CodexAccountHome.prepareLegacyMigration(accountID: accountID)
-        var migrationCommitted = false
+actor CodexOperationGate {
+    private var isLocked = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !isLocked {
+            isLocked = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            isLocked = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
+actor CodexAccountCoordinator {
+    static let shared = CodexAccountCoordinator()
+    private let gate = CodexOperationGate()
+
+    func refresh(accountID: UUID) async throws -> CodexAccountResult {
+        await gate.acquire()
+        do {
+            let result = try await refreshUnlocked(accountID: accountID)
+            await gate.release()
+            return result
+        } catch {
+            await gate.release()
+            throw error
+        }
+    }
+
+    func validate(accountID: UUID) async throws {
+        await gate.acquire()
+        do {
+            try await validateUnlocked(accountID: accountID)
+            await gate.release()
+        } catch {
+            await gate.release()
+            throw error
+        }
+    }
+
+    func importCredential(from runtime: CodexRuntimeHome, accountID: UUID) async throws {
+        await gate.acquire()
+        do {
+            try runtime.persistCredential(accountID: accountID)
+            await gate.release()
+        } catch {
+            await gate.release()
+            throw error
+        }
+    }
+
+    private func refreshUnlocked(accountID: UUID) async throws -> CodexAccountResult {
+        let context = try makeContext(accountID: accountID)
         let client: CodexAppServerClient
         do {
-            client = try await CodexAppServerClient.start(accountID: accountID)
+            client = try await CodexAppServerClient.start(homeURL: context.homeURL)
         } catch {
-            if let migration { CodexAccountHome.rollback(migration) }
+            context.runtime?.remove()
             throw error
         }
 
@@ -726,56 +629,129 @@ enum CodexAccountService {
             guard account["account"]?["type"]?.stringValue == "chatgpt" else {
                 throw CodexAppServerError.notAuthenticated
             }
-            if let migration {
-                do {
-                    try CodexAccountHome.commit(migration)
-                } catch {
-                    CodexAccountHome.rollback(migration)
-                    throw error
-                }
-                migrationCommitted = true
-            }
-
             async let limitsRequest = client.request("account/rateLimits/read")
             async let usageRequest = client.request("account/usage/read")
             let (limits, usage) = try await (limitsRequest, usageRequest)
             await client.stop()
-            return parse(account: account, limits: limits, usage: usage)
+            try persist(context: context, accountID: accountID)
+            return CodexAccountService.parse(account: account, limits: limits, usage: usage)
         } catch {
             await client.stop()
-            if let migration, !migrationCommitted { CodexAccountHome.rollback(migration) }
+            try? persist(context: context, accountID: accountID)
             throw error
         }
     }
 
-    static func validate(accountID: UUID) async throws {
-        let migration = try CodexAccountHome.prepareLegacyMigration(accountID: accountID)
+    private func validateUnlocked(accountID: UUID) async throws {
+        let context = try makeContext(accountID: accountID)
         let client: CodexAppServerClient
         do {
-            client = try await CodexAppServerClient.start(accountID: accountID)
+            client = try await CodexAppServerClient.start(homeURL: context.homeURL)
         } catch {
-            if let migration { CodexAccountHome.rollback(migration) }
+            context.runtime?.remove()
             throw error
         }
+
         do {
             let response = try await client.request("account/read", params: .object(["refreshToken": .bool(false)]))
             guard response["account"]?["type"]?.stringValue == "chatgpt" else {
                 throw CodexAppServerError.notAuthenticated
             }
-            if let migration {
-                do {
-                    try CodexAccountHome.commit(migration)
-                } catch {
-                    CodexAccountHome.rollback(migration)
-                    throw error
-                }
-            }
             await client.stop()
+            try persist(context: context, accountID: accountID)
         } catch {
             await client.stop()
-            if let migration { CodexAccountHome.rollback(migration) }
+            try? persist(context: context, accountID: accountID)
             throw error
         }
+    }
+
+    func openDesktop(accountID: UUID, allAccountIDs: [UUID]) async throws {
+        await gate.acquire()
+        do {
+            try await openDesktopUnlocked(accountID: accountID, allAccountIDs: allAccountIDs)
+            await gate.release()
+        } catch {
+            await gate.release()
+            throw error
+        }
+    }
+
+    private func openDesktopUnlocked(accountID: UUID, allAccountIDs: [UUID]) async throws {
+        try CodexNativeHome.validateConfiguration()
+        guard let appURL = await CodexDesktopLauncher.applicationURL() else {
+            throw CodexAppServerError.appMissing
+        }
+
+        try await CodexDesktopLauncher.quitRunningApplications()
+        let previousAuth = try? Data(contentsOf: CodexNativeHome.authURL)
+        if let previousAuth,
+           let previousExternalID = CodexCredentialVault.externalAccountID(from: previousAuth) {
+            for knownID in allAccountIDs {
+                guard let stored = try? CodexCredentialVault.load(accountID: knownID) else { continue }
+                if CodexCredentialVault.externalAccountID(from: stored) == previousExternalID {
+                    try CodexCredentialVault.save(previousAuth, accountID: knownID)
+                    break
+                }
+            }
+        }
+
+        do {
+            // 先用官方 app-server 验证并刷新目标凭据，然后再改动原生 auth.json。
+            try await validateUnlocked(accountID: accountID)
+            let targetAuth = try CodexCredentialVault.load(accountID: accountID)
+            try FileManager.default.createDirectory(at: CodexNativeHome.url, withIntermediateDirectories: true)
+            try CodexCredentialVault.atomicWrite(targetAuth, to: CodexNativeHome.authURL)
+            try await CodexDesktopLauncher.launchApplication(at: appURL)
+
+            // 启动后只校验原生凭据的账号 ID；桌面 Codex 从未被传入隔离目录。
+            try await Task.sleep(for: .milliseconds(500))
+            let active = try Data(contentsOf: CodexNativeHome.authURL)
+            guard CodexCredentialVault.externalAccountID(from: active) == CodexCredentialVault.externalAccountID(from: targetAuth) else {
+                throw CodexAppServerError.invalidResponse("启动后账号校验失败")
+            }
+        } catch {
+            try? await CodexDesktopLauncher.quitRunningApplications()
+            if let previousAuth {
+                try? CodexCredentialVault.atomicWrite(previousAuth, to: CodexNativeHome.authURL)
+                try? await CodexDesktopLauncher.launchApplication(at: appURL)
+            }
+            throw error
+        }
+    }
+
+    private struct Context {
+        let homeURL: URL
+        let runtime: CodexRuntimeHome?
+    }
+
+    private func makeContext(accountID: UUID) throws -> Context {
+        let credential = try CodexCredentialVault.load(accountID: accountID)
+        if let native = try? Data(contentsOf: CodexNativeHome.authURL),
+           CodexCredentialVault.externalAccountID(from: native) == CodexCredentialVault.externalAccountID(from: credential) {
+            return Context(homeURL: CodexNativeHome.url, runtime: nil)
+        }
+        let runtime = try CodexRuntimeHome.create(authData: credential)
+        return Context(homeURL: runtime.url, runtime: runtime)
+    }
+
+    private func persist(context: Context, accountID: UUID) throws {
+        defer { context.runtime?.remove() }
+        if let runtime = context.runtime {
+            try runtime.persistCredential(accountID: accountID)
+        } else {
+            try CodexCredentialVault.save(Data(contentsOf: CodexNativeHome.authURL), accountID: accountID)
+        }
+    }
+}
+
+enum CodexAccountService {
+    static func refresh(accountID: UUID) async throws -> CodexAccountResult {
+        try await CodexAccountCoordinator.shared.refresh(accountID: accountID)
+    }
+
+    static func validate(accountID: UUID) async throws {
+        try await CodexAccountCoordinator.shared.validate(accountID: accountID)
     }
 
     static func parse(account: JSONValue, limits: JSONValue, usage: JSONValue) -> CodexAccountResult {
@@ -836,22 +812,37 @@ enum CodexAccountService {
 }
 
 enum CodexDesktopLauncher {
+    static func open(accountID: UUID, allAccountIDs: [UUID]) async throws {
+        try await CodexAccountCoordinator.shared.openDesktop(
+            accountID: accountID,
+            allAccountIDs: allAccountIDs
+        )
+    }
+
     @MainActor
-    static func open(accountID: UUID) async throws {
-        try await CodexAccountService.validate(accountID: accountID)
-        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") else {
-            throw CodexAppServerError.appMissing
+    static func applicationURL() -> URL? {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex")
+    }
+
+    @MainActor
+    static func quitRunningApplications() async throws {
+        let applications = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
+        for application in applications where !application.isTerminated {
+            application.terminate()
         }
-        let home = try CodexAccountHome.url(for: accountID)
-        let sharedHome = CodexConversationStore.sharedHomeURL()
-        try await CodexConversationStore.prepareSharedHistory(accountHome: home, sharedHome: sharedHome)
+        let deadline = Date.now.addingTimeInterval(15)
+        while NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
+            .contains(where: { !$0.isTerminated }) {
+            guard Date.now < deadline else { throw CodexAppServerError.codexDidNotQuit }
+            try await Task.sleep(for: .milliseconds(150))
+        }
+    }
+
+    @MainActor
+    static func launchApplication(at appURL: URL) async throws {
         let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = true
+        configuration.createsNewApplicationInstance = false
         configuration.activates = true
-        configuration.environment = [
-            "CODEX_HOME": home.path,
-            "CODEX_SQLITE_HOME": sharedHome.path
-        ]
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
                 if let error { continuation.resume(throwing: error) }

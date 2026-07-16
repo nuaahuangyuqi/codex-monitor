@@ -86,7 +86,7 @@ final class AccountLoginModel: ObservableObject {
             self.session = nil
             currentAttemptID = nil
             if !isExistingAccount {
-                CodexAccountHome.delete(accountID: accountID)
+                CodexCredentialVault.delete(accountID: accountID)
                 accountID = UUID()
             }
             state = .failed(error.localizedDescription)
@@ -115,7 +115,7 @@ final class AccountLoginModel: ObservableObject {
         session = nil
         await activeSession?.cancelActiveLogin()
         if !isExistingAccount {
-            CodexAccountHome.delete(accountID: accountID)
+            CodexCredentialVault.delete(accountID: accountID)
             accountID = UUID()
         }
         state = .ready
@@ -132,7 +132,7 @@ final class AccountLoginModel: ObservableObject {
         Task {
             await session.cancelActiveLogin()
             if !isExistingAccount {
-                CodexAccountHome.delete(accountID: abandonedAccountID)
+                CodexCredentialVault.delete(accountID: abandonedAccountID)
             }
         }
     }
@@ -204,7 +204,7 @@ struct AccountLoginView: View {
             }
             .frame(height: 235)
 
-            Label("密码和登录凭据由 Codex 官方登录服务管理，本应用不会读取浏览器 Cookie。每个账号使用独立的本机认证空间。", systemImage: "lock.shield.fill")
+            Label("密码由 Codex 官方登录页处理，本应用不读取浏览器 Cookie。仅保存切换账号所需的凭据，不创建独立的 Codex 对话目录。", systemImage: "lock.shield.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

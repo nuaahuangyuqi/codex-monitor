@@ -6,14 +6,14 @@
 
 - 使用 Codex 官方 app-server OAuth 流程，不输入 API Key
 - 登录时自动打开默认浏览器，支持重新打开浏览器、取消并重新登录
-- 每个账号使用独立的 `CODEX_HOME`，认证、刷新和本地状态互不干扰
-- 所有账号共享默认 Codex 对话数据库，切换账号不会隐藏原有对话
+- Codex 桌面端永远使用原生 `~/.codex`，不再创建、合并或链接独立对话目录
+- 仅为每个账号保存权限为 `0600` 的登录凭据，用量查询的临时运行目录用后即删
 - 旧版本 CLIProxyAPIPlus 账号会在首次刷新时迁移到标准 Codex 认证格式
 - 自动读取 ChatGPT 方案类型、Codex 额度百分比和恢复时间
 - 多账号汇总或单账号查看
 - 7/30 天 Token 趋势图，支持指针交互查看每日数据
 - 按日期列出每个账号的每日 Token 使用量
-- 在账号卡片中一键用该账号打开独立 Codex 实例
+- 在账号卡片中一键切换原生凭据并打开 Codex，失败时自动回滚
 - 支持对已有账号重新进行官方授权
 - 菜单栏快速查看 Token 与各账号剩余额度
 - 仪表盘每 15 分钟自动刷新，打开菜单栏时也会检查数据新鲜度
@@ -39,10 +39,12 @@ open "dist/Codex Monitor.app"
 
 ## 多账号工作方式
 
-每个账号都保存在 `~/Library/Application Support/CodexMonitor/Accounts/<账号ID>/CodexHome`。刷新时应用为每个账号启动短生命周期 app-server，并分别调用：
+账号凭据保存在 `~/Library/Application Support/CodexMonitor/Credentials`，该目录不包含任何对话、SQLite 数据库、缓存或 Codex 配置。刷新非当前账号时，应用会创建一个短生命周临时目录，为该账号启动 app-server，并分别调用：
 
 - `account/read`
 - `account/rateLimits/read`
 - `account/usage/read`
 
-“用此账号打开 Codex”会创建新的 Codex 应用实例，并只为该实例设置对应的 `CODEX_HOME`。账号目录仅隔离认证和账号配置；`state_5.sqlite`、`sessions`、`archived_sessions`、会话索引、附件和生成图片都会迁移后链接到默认 `~/.codex` 目录。`CODEX_SQLITE_HOME` 也明确指向 `~/.codex`，所以无论 Codex 桌面端是否传递该环境变量，所有账号都会使用默认历史记录目录。迁移前会保留本地备份，用户默认登录不会被覆盖。
+"用此账号打开 Codex"会先请求正在运行的 Codex 正常退出，保存其最新凭据，验证目标账号后原子替换 `~/.codex/auth.json`，再通过 Launch Services 正常打开 Codex。启动时不传入 `CODEX_HOME` 或 `CODEX_SQLITE_HOME`，因此所有账号始终看到同一份原生对话。如果 Codex 无法完全退出、目标凭据无效、配置重定向了 SQLite，或启动后校验失败，应用会拒绝切换并恢复原账号。
+
+首次启动 1.3.0 时，旧版 `Accounts/<账号ID>/CodexHome` 中的凭据会被提取，随后整个隔离数据目录被删除。其中独有对话不会合并到 `~/.codex`。

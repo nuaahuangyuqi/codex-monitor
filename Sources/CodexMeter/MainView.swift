@@ -187,7 +187,10 @@ struct MainView: View {
         launchingAccountID = account.id
         Task {
             do {
-                try await CodexDesktopLauncher.open(accountID: account.id)
+                try await CodexDesktopLauncher.open(
+                    accountID: account.id,
+                    allAccountIDs: store.accounts.map(\.id)
+                )
             } catch {
                 launchError = error.localizedDescription
             }
