@@ -203,10 +203,10 @@ enum CodexConversationStore {
         return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
     }
 
-    static func mergeAccountHistoryIfNeeded(accountHome: URL, sharedHome: URL) async throws {
+    static func prepareSharedHistory(accountHome: URL, sharedHome: URL) async throws {
         do {
             try await Task.detached(priority: .userInitiated) {
-                try mergeSynchronously(accountHome: accountHome, sharedHome: sharedHome)
+                try prepareSynchronously(accountHome: accountHome, sharedHome: sharedHome)
             }.value
         } catch let error as CodexAppServerError {
             throw error
@@ -215,30 +215,91 @@ enum CodexConversationStore {
         }
     }
 
-    private static func mergeSynchronously(accountHome: URL, sharedHome: URL) throws {
+    private static func prepareSynchronously(accountHome: URL, sharedHome: URL) throws {
+        let manager = FileManager.default
+        try manager.createDirectory(at: sharedHome, withIntermediateDirectories: true)
+        try mergeDatabase(accountHome: accountHome, sharedHome: sharedHome)
+
+        var backupRoot: URL?
+        for name in historyDirectoryNames {
+            let source = accountHome.appendingPathComponent(name, isDirectory: true)
+            let target = sharedHome.appendingPathComponent(name, isDirectory: true)
+            try manager.createDirectory(at: target, withIntermediateDirectories: true)
+            try copyMissingFiles(from: source, to: target)
+        }
+        for name in historyFileNames {
+            try appendMissingJSONLines(
+                from: accountHome.appendingPathComponent(name),
+                to: sharedHome.appendingPathComponent(name),
+                accountHome: accountHome,
+                backupRoot: &backupRoot
+            )
+        }
+
+        for name in historyDirectoryNames {
+            try replaceWithSymlink(
+                at: accountHome.appendingPathComponent(name, isDirectory: true),
+                pointingTo: sharedHome.appendingPathComponent(name, isDirectory: true),
+                accountHome: accountHome,
+                backupRoot: &backupRoot
+            )
+        }
+        for name in historyFileNames {
+            try replaceWithSymlink(
+                at: accountHome.appendingPathComponent(name),
+                pointingTo: sharedHome.appendingPathComponent(name),
+                accountHome: accountHome,
+                backupRoot: &backupRoot
+            )
+        }
+
+        let sharedDatabase = sharedHome.appendingPathComponent("state_5.sqlite")
+        let accountDatabase = accountHome.appendingPathComponent("state_5.sqlite")
+        if manager.fileExists(atPath: sharedDatabase.path) {
+            for suffix in ["-shm", "-wal"] {
+                try moveToBackupIfPresent(
+                    accountHome.appendingPathComponent("state_5.sqlite\(suffix)"),
+                    accountHome: accountHome,
+                    backupRoot: &backupRoot
+                )
+            }
+            try replaceWithSymlink(
+                at: accountDatabase,
+                pointingTo: sharedDatabase,
+                accountHome: accountHome,
+                backupRoot: &backupRoot
+            )
+        }
+    }
+
+    private static func mergeDatabase(accountHome: URL, sharedHome: URL) throws {
         let manager = FileManager.default
         let source = accountHome.appendingPathComponent("state_5.sqlite")
         let destination = sharedHome.appendingPathComponent("state_5.sqlite")
         guard source.standardizedFileURL != destination.standardizedFileURL,
               manager.fileExists(atPath: source.path),
-              manager.fileExists(atPath: destination.path) else { return }
+              manager.fileExists(atPath: destination.path),
+              !isSymlink(source, pointingTo: destination) else { return }
 
         let sourcePath = sqlQuoted(source.path)
         let countSQL = """
+        PRAGMA busy_timeout = 10000;
         ATTACH DATABASE '\(sourcePath)' AS account_state;
         SELECT COUNT(*)
         FROM account_state.threads AS source
         WHERE NOT EXISTS (SELECT 1 FROM main.threads AS target WHERE target.id = source.id);
         """
         let countText = try runSQLite(database: destination, command: countSQL)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isNewline)
+            .last
+            .map(String.init) ?? ""
         guard let missingCount = Int(countText), missingCount > 0 else { return }
 
         let backupDirectory = accountHome.appendingPathComponent("migration-backups", isDirectory: true)
         try manager.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
         try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: backupDirectory.path)
         let stamp = backupFormatter.string(from: .now)
-        let backup = backupDirectory.appendingPathComponent("shared-state-before-merge-\(stamp).sqlite")
+        let backup = backupDirectory.appendingPathComponent("shared-state-before-merge-\(stamp)-\(UUID().uuidString.prefix(8)).sqlite")
         _ = try runSQLite(database: destination, command: ".backup '\(sqlQuoted(backup.path))'")
         try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
 
@@ -254,6 +315,128 @@ enum CodexConversationStore {
         COMMIT;
         """
         _ = try runSQLite(database: destination, command: mergeSQL)
+    }
+
+    private static func copyMissingFiles(from source: URL, to target: URL) throws {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: source.path),
+              (try? manager.destinationOfSymbolicLink(atPath: source.path)) == nil,
+              let enumerator = manager.enumerator(
+                  at: source,
+                  includingPropertiesForKeys: [.isRegularFileKey],
+                  options: [.skipsHiddenFiles]
+              ) else { return }
+
+        for case let file as URL in enumerator {
+            let values = try file.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            let sourceComponents = source.standardizedFileURL.pathComponents
+            let fileComponents = file.standardizedFileURL.pathComponents
+            let relativeComponents = fileComponents.dropFirst(sourceComponents.count)
+            let destination = relativeComponents.reduce(target) { partial, component in
+                partial.appendingPathComponent(component)
+            }
+            guard !manager.fileExists(atPath: destination.path) else { continue }
+            try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try manager.copyItem(at: file, to: destination)
+        }
+    }
+
+    private static func appendMissingJSONLines(
+        from source: URL,
+        to target: URL,
+        accountHome: URL,
+        backupRoot: inout URL?
+    ) throws {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: source.path),
+              (try? manager.destinationOfSymbolicLink(atPath: source.path)) == nil else { return }
+        if !manager.fileExists(atPath: target.path) {
+            try manager.copyItem(at: source, to: target)
+            return
+        }
+
+        let targetText = try String(contentsOf: target, encoding: .utf8)
+        let sourceText = try String(contentsOf: source, encoding: .utf8)
+        var knownIDs = Set(targetText.split(whereSeparator: \.isNewline).compactMap(jsonLineID))
+        var additions: [String] = []
+        for line in sourceText.split(whereSeparator: \.isNewline) {
+            guard let id = jsonLineID(line), knownIDs.insert(id).inserted else { continue }
+            additions.append(String(line))
+        }
+        guard !additions.isEmpty else { return }
+
+        let backup = try ensureBackupRoot(accountHome: accountHome, backupRoot: &backupRoot)
+            .appendingPathComponent("shared-before-link", isDirectory: true)
+            .appendingPathComponent(target.lastPathComponent)
+        try manager.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try manager.copyItem(at: target, to: backup)
+        var merged = targetText
+        if !merged.isEmpty, !merged.hasSuffix("\n") { merged.append("\n") }
+        merged.append(additions.joined(separator: "\n"))
+        merged.append("\n")
+        try Data(merged.utf8).write(to: target, options: .atomic)
+    }
+
+    private static func jsonLineID(_ line: Substring) -> String? {
+        guard let data = String(line).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (object["id"] as? String) ?? (object["session_id"] as? String)
+    }
+
+    private static func replaceWithSymlink(
+        at source: URL,
+        pointingTo target: URL,
+        accountHome: URL,
+        backupRoot: inout URL?
+    ) throws {
+        let manager = FileManager.default
+        if isSymlink(source, pointingTo: target) { return }
+        let existingLink = try? manager.destinationOfSymbolicLink(atPath: source.path)
+        if manager.fileExists(atPath: source.path) || existingLink != nil {
+            let backup = try ensureBackupRoot(accountHome: accountHome, backupRoot: &backupRoot)
+                .appendingPathComponent("profile-history", isDirectory: true)
+                .appendingPathComponent(source.lastPathComponent)
+            try manager.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try manager.moveItem(at: source, to: backup)
+        }
+        try manager.createSymbolicLink(atPath: source.path, withDestinationPath: target.path)
+    }
+
+    private static func moveToBackupIfPresent(
+        _ source: URL,
+        accountHome: URL,
+        backupRoot: inout URL?
+    ) throws {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: source.path) else { return }
+        let backup = try ensureBackupRoot(accountHome: accountHome, backupRoot: &backupRoot)
+            .appendingPathComponent("profile-history", isDirectory: true)
+            .appendingPathComponent(source.lastPathComponent)
+        try manager.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try manager.moveItem(at: source, to: backup)
+    }
+
+    private static func ensureBackupRoot(accountHome: URL, backupRoot: inout URL?) throws -> URL {
+        if let backupRoot { return backupRoot }
+        let root = accountHome
+            .appendingPathComponent("migration-backups", isDirectory: true)
+            .appendingPathComponent(
+                "shared-history-\(backupFormatter.string(from: .now))-\(UUID().uuidString.prefix(8))",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+        backupRoot = root
+        return root
+    }
+
+    private static func isSymlink(_ source: URL, pointingTo target: URL) -> Bool {
+        guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: source.path) else { return false }
+        let destinationURL = destination.hasPrefix("/")
+            ? URL(fileURLWithPath: destination)
+            : source.deletingLastPathComponent().appendingPathComponent(destination)
+        return destinationURL.standardizedFileURL == target.standardizedFileURL
     }
 
     private static func runSQLite(database: URL, command: String) throws -> String {
@@ -283,6 +466,19 @@ enum CodexConversationStore {
     private static func sqlQuoted(_ value: String) -> String {
         value.replacingOccurrences(of: "'", with: "''")
     }
+
+    private static let historyDirectoryNames = [
+        "sessions",
+        "archived_sessions",
+        "attachments",
+        "generated_images"
+    ]
+
+    private static let historyFileNames = [
+        "session_index.jsonl",
+        "history.jsonl",
+        "transcription-history.jsonl"
+    ]
 
     private static let backupFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -395,7 +591,10 @@ actor CodexAppServerClient {
         readerTask?.cancel()
         readerTask = nil
         try? inputPipe.fileHandleForWriting.close()
-        if process.isRunning { process.terminate() }
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+        }
         errorPipe.fileHandleForReading.readabilityHandler = nil
         failAll(with: CodexAppServerError.processEnded)
     }
@@ -645,7 +844,7 @@ enum CodexDesktopLauncher {
         }
         let home = try CodexAccountHome.url(for: accountID)
         let sharedHome = CodexConversationStore.sharedHomeURL()
-        try await CodexConversationStore.mergeAccountHistoryIfNeeded(accountHome: home, sharedHome: sharedHome)
+        try await CodexConversationStore.prepareSharedHistory(accountHome: home, sharedHome: sharedHome)
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
         configuration.activates = true

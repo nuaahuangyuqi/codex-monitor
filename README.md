@@ -45,4 +45,4 @@ open "dist/Codex Monitor.app"
 - `account/rateLimits/read`
 - `account/usage/read`
 
-“用此账号打开 Codex”会创建新的 Codex 应用实例，并只为该实例设置对应的 `CODEX_HOME`。认证信息按账号隔离，但 `CODEX_SQLITE_HOME` 指向默认的 `~/.codex`，所以所有账号看到同一份对话列表。旧版账号目录中独有的会话会先备份并合并到共享数据库，用户默认登录不会被覆盖。
+“用此账号打开 Codex”会创建新的 Codex 应用实例，并只为该实例设置对应的 `CODEX_HOME`。账号目录仅隔离认证和账号配置；`state_5.sqlite`、`sessions`、`archived_sessions`、会话索引、附件和生成图片都会迁移后链接到默认 `~/.codex` 目录。`CODEX_SQLITE_HOME` 也明确指向 `~/.codex`，所以无论 Codex 桌面端是否传递该环境变量，所有账号都会使用默认历史记录目录。迁移前会保留本地备份，用户默认登录不会被覆盖。
