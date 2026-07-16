@@ -17,31 +17,8 @@ struct DashboardView: View {
                 header
                 summary
                 availabilityNote
+                accountOverview
                 chartCard
-
-                if accounts.count > 1 {
-                    Text("账号概览")
-                        .font(.title3.weight(.semibold))
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 14)], spacing: 14) {
-                        ForEach(accounts) { account in
-                            AccountStatusCard(
-                                account: account,
-                                snapshot: snapshot(for: account.id),
-                                isLaunching: launchingAccountID == account.id,
-                                onOpenCodex: { onOpenCodex(account) },
-                                onReauthenticate: { onReauthenticate(account) }
-                            )
-                        }
-                    }
-                } else if let account = accounts.first {
-                    AccountStatusCard(
-                        account: account,
-                        snapshot: snapshot(for: account.id),
-                        isLaunching: launchingAccountID == account.id,
-                        onOpenCodex: { onOpenCodex(account) },
-                        onReauthenticate: { onReauthenticate(account) }
-                    )
-                }
             }
             .padding(24)
         }
@@ -85,6 +62,24 @@ struct DashboardView: View {
             .background(.blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
     }
 
+    private var accountOverview: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("账号概览")
+                .font(.title3.weight(.semibold))
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 14)], spacing: 14) {
+                ForEach(accounts) { account in
+                    AccountStatusCard(
+                        account: account,
+                        snapshot: snapshot(for: account.id),
+                        isLaunching: launchingAccountID == account.id,
+                        onOpenCodex: { onOpenCodex(account) },
+                        onReauthenticate: { onReauthenticate(account) }
+                    )
+                }
+            }
+        }
+    }
+
     private var chartCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -95,6 +90,7 @@ struct DashboardView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
+                        .lineLimit(1)
                 }
                 Spacer()
                 Text("Token")
@@ -105,7 +101,7 @@ struct DashboardView: View {
 
             if series.isEmpty {
                 ContentUnavailableView("暂无 Token 活动", systemImage: "chart.bar.xaxis", description: Text("完成 ChatGPT 官方登录后点击刷新，或检查账号错误提示。"))
-                    .frame(height: 230)
+                    .frame(height: 260)
             } else {
                 Chart {
                     ForEach(series) { point in
@@ -130,32 +126,42 @@ struct DashboardView: View {
                 .chartXSelection(value: $selectedDate)
                 .chartLegend(position: .bottom, alignment: .leading, spacing: 12)
                 .frame(height: 260)
+            }
+
+            HStack(spacing: 10) {
                 if let selectedDate {
-                    HStack(spacing: 14) {
-                        ForEach(selectedPoints) { point in
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(color(for: point.accountName))
-                                    .frame(width: 7, height: 7)
-                                Text(point.accountName)
-                                    .foregroundStyle(.secondary)
-                                Text(Formatters.count(Int(point.value)))
-                                    .fontWeight(.semibold)
-                                    .monospacedDigit()
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 14) {
+                            ForEach(selectedPoints) { point in
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(color(for: point.accountName))
+                                        .frame(width: 7, height: 7)
+                                    Text(point.accountName)
+                                        .foregroundStyle(.secondary)
+                                    Text(Formatters.count(Int(point.value)))
+                                        .fontWeight(.semibold)
+                                        .monospacedDigit()
+                                }
+                                .font(.caption)
                             }
-                            .font(.caption)
                         }
-                        Spacer()
-                        Button("清除选择") { self.selectedDate = nil }
-                            .buttonStyle(.plain)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal, 2)
-                    .accessibilityLabel("\(selectedDate.formatted(date: .long, time: .omitted)) 使用量明细")
+                    Button("清除选择") { self.selectedDate = nil }
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Color.clear
                 }
             }
+            .padding(.horizontal, 2)
+            .frame(height: 24)
+            .accessibilityLabel(selectedDate.map {
+                "\($0.formatted(date: .long, time: .omitted)) 使用量明细"
+            } ?? "尚未选择日期")
         }
+        .frame(height: 352, alignment: .top)
         .padding(18)
         .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(.separator.opacity(0.35), lineWidth: 1))

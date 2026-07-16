@@ -43,14 +43,19 @@ struct MenuBarView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(store.accounts) { account in
-                            HStack(spacing: 9) {
-                                Circle().fill(AppPalette.color(for: account.colorIndex)).frame(width: 8, height: 8)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(account.name).font(.callout.weight(.medium))
+                            HStack(alignment: .bottom, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack(spacing: 7) {
+                                        Circle()
+                                            .fill(AppPalette.color(for: account.colorIndex))
+                                            .frame(width: 8, height: 8)
+                                        Text(account.name)
+                                            .font(.callout.weight(.medium))
+                                            .lineLimit(1)
                                         Spacer()
                                         Text("剩余 \(Int(100 - quotaUsed(for: account)))%")
-                                            .font(.caption).monospacedDigit()
+                                            .font(.caption)
+                                            .monospacedDigit()
                                     }
                                     ProgressView(value: quotaUsed(for: account), total: 100)
                                         .tint(quotaUsed(for: account) >= 85 ? .orange : AppPalette.color(for: account.colorIndex))
@@ -59,12 +64,15 @@ struct MenuBarView: View {
                                     openCodex(account)
                                 } label: {
                                     if launchingAccountID == account.id {
-                                        ProgressView().controlSize(.small)
+                                        ProgressView()
+                                            .controlSize(.small)
+                                            .frame(width: 74)
                                     } else {
-                                        Image(systemName: "arrow.up.right.square")
+                                        Text("打开 Codex")
                                     }
                                 }
-                                .buttonStyle(.borderless)
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
                                 .disabled(launchingAccountID != nil)
                                 .help("用此账号打开 Codex")
                             }
@@ -85,7 +93,7 @@ struct MenuBarView: View {
             }
         }
         .padding(16)
-        .frame(width: 350)
+        .frame(width: 410)
         .alert("无法打开 Codex", isPresented: Binding(
             get: { launchError != nil },
             set: { if !$0 { launchError = nil } }
