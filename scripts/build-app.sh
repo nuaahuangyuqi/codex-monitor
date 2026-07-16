@@ -6,8 +6,8 @@ cd "$ROOT"
 
 APP_NAME="大同"
 DISPLAY_NAME="Codex 账号仪表盘"
-VERSION="${APP_VERSION:-1.4.5}"
-BUILD_NUMBER="${APP_BUILD:-11}"
+VERSION="${APP_VERSION:-2.0.0}"
+BUILD_NUMBER="${APP_BUILD:-12}"
 ARM_SCRATCH="$ROOT/.build/release-arm64"
 X86_SCRATCH="$ROOT/.build/release-x86_64"
 
@@ -30,18 +30,12 @@ cp "$ROOT/Sources/CodexMeter/Resources/AppIcon/AppIcon.icns" "$CONTENTS/Resource
 cp "$ROOT/Sources/CodexMeter/Resources/AppIcon/AppIconDefault.png" "$CONTENTS/Resources/AppIcon/AppIconDefault.png"
 cp "$ROOT/Sources/CodexMeter/Resources/AppIcon/AppIconDark.png" "$CONTENTS/Resources/AppIcon/AppIconDark.png"
 cp "$ROOT/Sources/CodexMeter/Resources/AppIcon/AppIconMono.png" "$CONTENTS/Resources/AppIcon/AppIconMono.png"
+cp "$ROOT/Packaging/Info.plist" "$CONTENTS/Info.plist"
 
-/usr/libexec/PlistBuddy -c "Add :CFBundleName string $DISPLAY_NAME" \
-  -c "Add :CFBundleDisplayName string $DISPLAY_NAME" \
-  -c 'Add :CFBundleIdentifier string com.codexmeter.macos' \
-  -c "Add :CFBundleVersion string $BUILD_NUMBER" \
-  -c "Add :CFBundleShortVersionString string $VERSION" \
-  -c 'Add :CFBundleIconFile string AppIcon.icns' \
-  -c 'Add :CFBundleExecutable string CodexMeter' \
-  -c 'Add :CFBundlePackageType string APPL' \
-  -c 'Add :LSApplicationCategoryType string public.app-category.developer-tools' \
-  -c 'Add :LSMinimumSystemVersion string 14.0' \
-  -c 'Add :NSHighResolutionCapable bool true' \
+/usr/libexec/PlistBuddy -c "Set :CFBundleName $DISPLAY_NAME" \
+  -c "Set :CFBundleDisplayName $DISPLAY_NAME" \
+  -c "Set :CFBundleVersion $BUILD_NUMBER" \
+  -c "Set :CFBundleShortVersionString $VERSION" \
   "$CONTENTS/Info.plist"
 
 if [[ -n "${DEVELOPER_ID_APPLICATION:-}" ]]; then

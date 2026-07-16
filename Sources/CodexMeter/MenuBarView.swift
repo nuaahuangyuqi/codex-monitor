@@ -9,7 +9,9 @@ struct MenuBarView: View {
     @State private var launchError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        ZStack {
+            AppAmbientBackground()
+            VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("账号用量").font(.headline)
@@ -22,7 +24,8 @@ struct MenuBarView: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .buttonStyle(.plain)
+                .appGlassButton()
+                .controlSize(.small)
                 .disabled(dashboard.isRefreshing || store.accounts.isEmpty)
             }
 
@@ -37,19 +40,23 @@ struct MenuBarView: View {
                     Divider().frame(height: 34)
                     menuStat("账号", "\(store.accounts.count)")
                 }
+                .padding(.vertical, 8)
+                .appGlassPanel(cornerRadius: 16, tint: .blue.opacity(0.05))
 
                 Divider()
 
                 ScrollView {
-                    VStack(spacing: 12) {
-                        ForEach(store.accounts) { account in
-                            MenuAccountQuotaRow(
-                                account: account,
-                                snapshot: dashboard.snapshots[account.id],
-                                isLaunching: launchingAccountID == account.id,
-                                isLaunchDisabled: launchingAccountID != nil,
-                                onOpenCodex: { openCodex(account) }
-                            )
+                    AppGlassContainer(spacing: 12) {
+                        VStack(spacing: 12) {
+                            ForEach(store.accounts) { account in
+                                MenuAccountQuotaRow(
+                                    account: account,
+                                    snapshot: dashboard.snapshots[account.id],
+                                    isLaunching: launchingAccountID == account.id,
+                                    isLaunchDisabled: launchingAccountID != nil,
+                                    onOpenCodex: { openCodex(account) }
+                                )
+                            }
                         }
                     }
                 }
@@ -62,12 +69,14 @@ struct MenuBarView: View {
                 Button("打开仪表盘") {
                     showDashboard()
                 }
-                .buttonStyle(.borderedProminent)
+                .appGlassButton(prominent: true)
                 Spacer()
                 Button("退出") { NSApp.terminate(nil) }
+                    .appGlassButton()
             }
+            }
+            .padding(16)
         }
-        .padding(16)
         .frame(width: 410)
         .alert("无法打开 Codex", isPresented: Binding(
             get: { launchError != nil },
@@ -159,7 +168,7 @@ private struct MenuAccountQuotaRow: View {
                         Text("打开 Codex")
                     }
                 }
-                .buttonStyle(.bordered)
+                .appGlassButton(tint: AppPalette.color(for: account.colorIndex).opacity(0.18))
                 .controlSize(.small)
                 .disabled(isLaunchDisabled)
                 .help("用此账号打开 Codex")
@@ -213,10 +222,10 @@ private struct MenuAccountQuotaRow: View {
             }
         }
         .padding(12)
-        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .stroke(.separator.opacity(0.3), lineWidth: 1)
-        }
+        .appGlassPanel(
+            cornerRadius: 16,
+            tint: AppPalette.color(for: account.colorIndex).opacity(0.06),
+            interactive: true
+        )
     }
 }

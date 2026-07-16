@@ -22,7 +22,7 @@ struct DashboardView: View {
             }
             .padding(24)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background { AppAmbientBackground() }
     }
 
     private var header: some View {
@@ -45,11 +45,13 @@ struct DashboardView: View {
     }
 
     private var summary: some View {
-        HStack(spacing: 14) {
-            MetricCard(title: "刷新周期 Token", value: Formatters.count(snapshots.totalCycleTokens), icon: "text.word.spacing", tint: .blue)
-            MetricCard(title: "历史 Token", value: Formatters.count(snapshots.compactMap(\.lifetimeTokens).reduce(0, +)), icon: "clock.arrow.circlepath", tint: .purple)
-            MetricCard(title: "单日峰值", value: Formatters.count(snapshots.compactMap(\.peakDailyTokens).max() ?? 0), icon: "chart.line.uptrend.xyaxis", tint: .teal)
-            MetricCard(title: "账号", value: "\(accounts.count)", icon: "person.2.fill", tint: .orange)
+        AppGlassContainer(spacing: 14) {
+            HStack(spacing: 14) {
+                MetricCard(title: "刷新周期 Token", value: Formatters.count(snapshots.totalCycleTokens), icon: "text.word.spacing", tint: .blue)
+                MetricCard(title: "历史 Token", value: Formatters.count(snapshots.compactMap(\.lifetimeTokens).reduce(0, +)), icon: "clock.arrow.circlepath", tint: .purple)
+                MetricCard(title: "单日峰值", value: Formatters.count(snapshots.compactMap(\.peakDailyTokens).max() ?? 0), icon: "chart.line.uptrend.xyaxis", tint: .teal)
+                MetricCard(title: "账号", value: "\(accounts.count)", icon: "person.2.fill", tint: .orange)
+            }
         }
     }
 
@@ -59,22 +61,24 @@ struct DashboardView: View {
             .foregroundStyle(.secondary)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+            .appGlassPanel(cornerRadius: 14, tint: .blue.opacity(0.10))
     }
 
     private var accountOverview: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("账号概览")
                 .font(.title3.weight(.semibold))
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 14)], spacing: 14) {
-                ForEach(accounts) { account in
-                    AccountStatusCard(
-                        account: account,
-                        snapshot: snapshot(for: account.id),
-                        isLaunching: launchingAccountID == account.id,
-                        onOpenCodex: { onOpenCodex(account) },
-                        onReauthenticate: { onReauthenticate(account) }
-                    )
+            AppGlassContainer(spacing: 14) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 14)], spacing: 14) {
+                    ForEach(accounts) { account in
+                        AccountStatusCard(
+                            account: account,
+                            snapshot: snapshot(for: account.id),
+                            isLaunching: launchingAccountID == account.id,
+                            onOpenCodex: { onOpenCodex(account) },
+                            onReauthenticate: { onReauthenticate(account) }
+                        )
+                    }
                 }
             }
         }
@@ -96,7 +100,7 @@ struct DashboardView: View {
                 Text("Token")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(.quaternary, in: Capsule())
+                    .appGlassCapsule(tint: .blue.opacity(0.08))
             }
 
             if series.isEmpty {
@@ -148,9 +152,9 @@ struct DashboardView: View {
                         }
                     }
                     Button("清除选择") { self.selectedDate = nil }
-                        .buttonStyle(.plain)
+                        .appGlassButton()
+                        .controlSize(.small)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
                 } else {
                     Color.clear
                 }
@@ -163,8 +167,7 @@ struct DashboardView: View {
         }
         .frame(height: 352, alignment: .top)
         .padding(18)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.separator.opacity(0.35), lineWidth: 1))
+        .appGlassPanel(cornerRadius: 22, tint: .blue.opacity(0.04))
     }
 
     private var series: [ChartSeriesPoint] {
@@ -242,7 +245,7 @@ private struct MetricCard: View {
                 .font(.title2)
                 .foregroundStyle(tint)
                 .frame(width: 38, height: 38)
-                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                .appGlassPanel(cornerRadius: 11, tint: tint.opacity(0.12))
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.caption).foregroundStyle(.secondary)
                 Text(value).font(.title3.weight(.semibold)).monospacedDigit()
@@ -251,8 +254,7 @@ private struct MetricCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity)
-        .background(.background, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(.separator.opacity(0.35), lineWidth: 1))
+        .appGlassPanel(cornerRadius: 18, tint: tint.opacity(0.06))
     }
 }
 
@@ -274,7 +276,7 @@ struct AccountStatusCard: View {
                 Text(planLabel)
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(.quaternary, in: Capsule())
+                    .appGlassCapsule(tint: AppPalette.color(for: account.colorIndex).opacity(0.08))
             }
 
             if let error = snapshot?.errorMessage {
@@ -327,7 +329,7 @@ struct AccountStatusCard: View {
                     Button("重新授权", systemImage: "person.crop.circle.badge.exclamationmark") {
                         onReauthenticate()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .appGlassButton(tint: AppPalette.color(for: account.colorIndex).opacity(0.20))
                     .controlSize(.small)
                 } else {
                     Button {
@@ -339,15 +341,18 @@ struct AccountStatusCard: View {
                             Label("用此账号打开 Codex", systemImage: "arrow.up.right.square")
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .appGlassButton(tint: AppPalette.color(for: account.colorIndex).opacity(0.20))
                     .controlSize(.small)
                     .disabled(isLaunching)
                 }
             }
         }
         .padding(17)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.separator.opacity(0.35), lineWidth: 1))
+        .appGlassPanel(
+            cornerRadius: 20,
+            tint: AppPalette.color(for: account.colorIndex).opacity(0.05),
+            interactive: true
+        )
     }
 
     private var quotaUsed: Double { snapshot?.quotaUsedPercent ?? 0 }

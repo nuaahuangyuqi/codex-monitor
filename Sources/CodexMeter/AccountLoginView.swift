@@ -181,11 +181,10 @@ struct AccountLoginView: View {
                     model.cancelForDismissal()
                     dismiss()
                 }
+                .appGlassButton()
             }
 
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.08))
                 VStack(spacing: 16) {
                     Image(systemName: stateIcon)
                         .font(.system(size: 42, weight: .medium))
@@ -203,6 +202,7 @@ struct AccountLoginView: View {
                 .padding(28)
             }
             .frame(height: 235)
+            .appGlassPanel(cornerRadius: 24, tint: Color.accentColor.opacity(0.08))
 
             Label("密码由 Codex 官方登录页处理，本应用不读取浏览器 Cookie。仅保存切换账号所需的凭据，不创建独立的 Codex 对话目录。", systemImage: "lock.shield.fill")
                 .font(.caption)
@@ -219,29 +219,32 @@ struct AccountLoginView: View {
                 if model.state == .completed {
                     Spacer()
                     Button("完成") { dismiss() }
-                        .buttonStyle(.borderedProminent)
+                        .appGlassButton(prominent: true)
                 } else if model.state == .waiting || model.state == .openingBrowser || model.state == .cancelling {
                     Button("取消登录") {
                         Task { await model.cancelAndReset() }
                     }
+                    .appGlassButton()
                     .disabled(model.state == .cancelling)
                     Spacer()
                     Button("重新打开浏览器") { model.reopenBrowser() }
-                        .buttonStyle(.borderedProminent)
+                        .appGlassButton(prominent: true)
                         .disabled(model.state != .waiting)
                 } else {
                     Button("关闭") { dismiss() }
+                        .appGlassButton()
                     Spacer()
                     Button(actionTitle) {
                         Task { await model.login(store: store, onSaved: onSaved) }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .appGlassButton(prominent: true)
                     .disabled(model.isPreparing)
                 }
             }
         }
         .padding(24)
         .frame(width: 540, height: 470)
+        .background { AppAmbientBackground() }
         .task { await model.prepare() }
         .onDisappear { model.cancelForDismissal() }
     }
