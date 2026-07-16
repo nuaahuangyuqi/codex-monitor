@@ -55,7 +55,7 @@ struct MainView: View {
                         } label: {
                             Label("添加账号", systemImage: "plus")
                         }
-                        .appGlassButton(prominent: true)
+                        .appGlassButton()
                     }
                     .padding(6)
                     .appFrostedControlBar()

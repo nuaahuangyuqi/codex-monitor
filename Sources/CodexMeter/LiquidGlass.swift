@@ -101,10 +101,14 @@ private struct AppGlassCapsuleModifier: ViewModifier {
 private struct AppFrostedControlBarModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(
-                .regularMaterial,
-                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-            )
+            .background {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(.regularMaterial)
+                    }
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(.white.opacity(0.24), lineWidth: 0.8)

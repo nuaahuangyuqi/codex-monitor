@@ -5,7 +5,7 @@ ROOT="${0:A:h:h}"
 cd "$ROOT"
 
 APP_NAME="归一"
-VERSION="${APP_VERSION:-2.0.1}"
+VERSION="${APP_VERSION:-2.0.2}"
 APP="$ROOT/dist/$APP_NAME.app"
 DMG="$ROOT/dist/$APP_NAME-$VERSION-universal.dmg"
 STAGING="$ROOT/dist/.dmg-staging"
