@@ -41,7 +41,7 @@ struct MenuBarView: View {
                 Divider()
 
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    VStack(spacing: 12) {
                         ForEach(store.accounts) { account in
                             MenuAccountQuotaRow(
                                 account: account,
@@ -53,7 +53,8 @@ struct MenuBarView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 420)
+                .frame(height: accountListHeight)
+                .scrollDisabled(store.accounts.count <= 3)
             }
 
             Divider()
@@ -80,6 +81,10 @@ struct MenuBarView: View {
 
     private var snapshots: [AccountSnapshot] {
         store.accounts.compactMap { dashboard.snapshots[$0.id] }
+    }
+
+    private var accountListHeight: CGFloat {
+        min(CGFloat(store.accounts.count) * 138, 420)
     }
 
     private func openCodex(_ account: AccountConfig) {
