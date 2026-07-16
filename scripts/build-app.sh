@@ -9,11 +9,8 @@ swift build -c release
 APP="$ROOT/dist/Codex Monitor.app"
 CONTENTS="$APP/Contents"
 rm -rf "$APP"
-mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
+mkdir -p "$CONTENTS/MacOS"
 cp "$ROOT/.build/release/CodexMeter" "$CONTENTS/MacOS/CodexMeter"
-cp "$ROOT/Sources/CodexMeter/Resources/cli-proxy-api-plus" "$CONTENTS/Resources/cli-proxy-api-plus"
-cp "$ROOT/THIRD_PARTY_NOTICES.md" "$CONTENTS/Resources/THIRD_PARTY_NOTICES.md"
-chmod 755 "$CONTENTS/Resources/cli-proxy-api-plus"
 
 /usr/libexec/PlistBuddy -c 'Add :CFBundleName string Codex Monitor' \
   -c 'Add :CFBundleDisplayName string Codex Monitor' \

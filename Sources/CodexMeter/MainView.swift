@@ -11,7 +11,10 @@ struct MainView: View {
 
     @State private var selection: SidebarSelection? = .all
     @State private var showingLogin = false
+    @State private var loginAccount: AccountConfig?
     @State private var accountToDelete: AccountConfig?
+    @State private var launchingAccountID: UUID?
+    @State private var launchError: String?
 
     var body: some View {
         NavigationSplitView {
@@ -40,6 +43,7 @@ struct MainView: View {
                 .disabled(dashboard.isRefreshing || store.accounts.isEmpty)
 
                 Button {
+                    loginAccount = nil
                     showingLogin = true
                 } label: {
                     Label("添加账号", systemImage: "plus")
@@ -47,9 +51,17 @@ struct MainView: View {
             }
         }
         .sheet(isPresented: $showingLogin) {
-            AccountLoginView(store: store) {
+            AccountLoginView(store: store, account: loginAccount) {
                 Task { await dashboard.refresh(accounts: store.accounts) }
             }
+        }
+        .alert("无法打开 Codex", isPresented: Binding(
+            get: { launchError != nil },
+            set: { if !$0 { launchError = nil } }
+        )) {
+            Button("好") { launchError = nil }
+        } message: {
+            Text(launchError ?? "未知错误")
         }
         .confirmationDialog(
             "删除账号？",
@@ -111,6 +123,10 @@ struct MainView: View {
                         }
                         .tag(SidebarSelection.account(account.id))
                         .contextMenu {
+                            Button("重新授权") {
+                                loginAccount = account
+                                showingLogin = true
+                            }
                             Button("删除", role: .destructive) { accountToDelete = account }
                         }
                     }
@@ -142,6 +158,7 @@ struct MainView: View {
                 Text("登录 ChatGPT 账号，查看 Codex Token 活动、方案与额度恢复时间。")
             } actions: {
                 Button("添加第一个账号") {
+                    loginAccount = nil
                     showingLogin = true
                 }
                 .buttonStyle(.borderedProminent)
@@ -150,7 +167,10 @@ struct MainView: View {
             DashboardView(
                 accounts: visibleAccounts,
                 snapshots: visibleAccounts.compactMap { dashboard.snapshots[$0.id] },
-                days: dashboard.days
+                days: dashboard.days,
+                launchingAccountID: launchingAccountID,
+                onOpenCodex: openCodex,
+                onReauthenticate: reauthenticate
             )
         }
     }
@@ -160,5 +180,23 @@ struct MainView: View {
         case .all: return store.accounts
         case .account(let id): return store.accounts.filter { $0.id == id }
         }
+    }
+
+    private func openCodex(_ account: AccountConfig) {
+        guard launchingAccountID == nil else { return }
+        launchingAccountID = account.id
+        Task {
+            do {
+                try await CodexDesktopLauncher.open(accountID: account.id)
+            } catch {
+                launchError = error.localizedDescription
+            }
+            launchingAccountID = nil
+        }
+    }
+
+    private func reauthenticate(_ account: AccountConfig) {
+        loginAccount = account
+        showingLogin = true
     }
 }

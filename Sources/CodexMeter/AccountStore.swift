@@ -22,7 +22,7 @@ final class AccountStore: ObservableObject {
 
     func delete(_ account: AccountConfig) {
         accounts.removeAll { $0.id == account.id }
-        QuotioOAuthSession.deleteAccountHome(id: account.id)
+        CodexAccountHome.delete(accountID: account.id)
         persist()
     }
 

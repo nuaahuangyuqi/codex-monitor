@@ -5,6 +5,9 @@ struct DashboardView: View {
     let accounts: [AccountConfig]
     let snapshots: [AccountSnapshot]
     let days: Int
+    let launchingAccountID: UUID?
+    let onOpenCodex: (AccountConfig) -> Void
+    let onReauthenticate: (AccountConfig) -> Void
 
     @State private var selectedDate: Date?
 
@@ -15,17 +18,30 @@ struct DashboardView: View {
                 summary
                 availabilityNote
                 chartCard
+                usageTableCard
 
                 if accounts.count > 1 {
                     Text("账号概览")
                         .font(.title3.weight(.semibold))
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 14)], spacing: 14) {
                         ForEach(accounts) { account in
-                            AccountStatusCard(account: account, snapshot: snapshot(for: account.id))
+                            AccountStatusCard(
+                                account: account,
+                                snapshot: snapshot(for: account.id),
+                                isLaunching: launchingAccountID == account.id,
+                                onOpenCodex: { onOpenCodex(account) },
+                                onReauthenticate: { onReauthenticate(account) }
+                            )
                         }
                     }
                 } else if let account = accounts.first {
-                    AccountStatusCard(account: account, snapshot: snapshot(for: account.id))
+                    AccountStatusCard(
+                        account: account,
+                        snapshot: snapshot(for: account.id),
+                        isLaunching: launchingAccountID == account.id,
+                        onOpenCodex: { onOpenCodex(account) },
+                        onReauthenticate: { onReauthenticate(account) }
+                    )
                 }
             }
             .padding(24)
@@ -123,11 +139,84 @@ struct DashboardView: View {
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(.separator.opacity(0.35), lineWidth: 1))
     }
 
+    private var usageTableCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("每日使用量")
+                        .font(.headline)
+                    Text("按日期列出各账号的 Codex Token 活动")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(usageRows.count) 条")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if usageRows.isEmpty {
+                ContentUnavailableView(
+                    "暂无每日数据",
+                    systemImage: "tablecells",
+                    description: Text("刷新账号后，每日 Token 使用量会显示在这里。")
+                )
+                .frame(height: 150)
+            } else {
+                Table(usageRows) {
+                    TableColumn("日期") { row in
+                        Text(row.date.formatted(date: .abbreviated, time: .omitted))
+                            .monospacedDigit()
+                    }
+                    .width(min: 120, ideal: 150)
+
+                    TableColumn("账号") { row in
+                        HStack(spacing: 7) {
+                            Circle()
+                                .fill(AppPalette.color(for: row.colorIndex))
+                                .frame(width: 7, height: 7)
+                            Text(row.accountName)
+                        }
+                    }
+
+                    TableColumn("Token") { row in
+                        Text(Formatters.count(row.tokens))
+                            .monospacedDigit()
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    .width(min: 100, ideal: 130)
+                }
+                .frame(height: min(CGFloat(usageRows.count * 34 + 34), 310))
+            }
+        }
+        .padding(18)
+        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.separator.opacity(0.35), lineWidth: 1))
+    }
+
     private var series: [ChartSeriesPoint] {
         accounts.flatMap { account in
             (snapshot(for: account.id)?.points ?? []).map { point in
                 ChartSeriesPoint(accountName: account.name, date: point.date, value: Double(point.totalTokens))
             }
+        }
+    }
+
+    private var usageRows: [UsageTableRow] {
+        accounts.flatMap { account in
+            (snapshot(for: account.id)?.points ?? []).map { point in
+                UsageTableRow(
+                    accountID: account.id,
+                    accountName: account.name,
+                    colorIndex: account.colorIndex,
+                    date: point.date,
+                    tokens: point.totalTokens
+                )
+            }
+        }
+        .sorted {
+            if $0.date != $1.date { return $0.date > $1.date }
+            return $0.accountName.localizedStandardCompare($1.accountName) == .orderedAscending
         }
     }
 
@@ -149,6 +238,15 @@ private struct ChartSeriesPoint: Identifiable {
     let date: Date
     let value: Double
     var id: String { "\(accountName)-\(date.timeIntervalSince1970)" }
+}
+
+private struct UsageTableRow: Identifiable {
+    let accountID: UUID
+    let accountName: String
+    let colorIndex: Int
+    let date: Date
+    let tokens: Int
+    var id: String { "\(accountID.uuidString)-\(date.timeIntervalSince1970)" }
 }
 
 private struct MetricCard: View {
@@ -180,6 +278,9 @@ private struct MetricCard: View {
 struct AccountStatusCard: View {
     let account: AccountConfig
     let snapshot: AccountSnapshot?
+    let isLaunching: Bool
+    let onOpenCodex: () -> Void
+    let onReauthenticate: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
@@ -231,6 +332,35 @@ struct AccountStatusCard: View {
                     }
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Label("独立账号空间", systemImage: "person.crop.circle.badge.checkmark")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if snapshot?.errorMessage != nil {
+                    Button("重新授权", systemImage: "person.crop.circle.badge.exclamationmark") {
+                        onReauthenticate()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                } else {
+                    Button {
+                        onOpenCodex()
+                    } label: {
+                        if isLaunching {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("用此账号打开 Codex", systemImage: "arrow.up.right.square")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isLaunching)
                 }
             }
         }

@@ -1,19 +1,19 @@
 # Codex Monitor for macOS
 
-原生 SwiftUI 菜单栏应用，通过 OpenAI 官方网页登录集中查看一个或多个 ChatGPT 账号的 Codex 订阅方案与模型额度。
+原生 SwiftUI 菜单栏应用，通过 Codex 官方 app-server 集中查看多个 ChatGPT 账号的 Token 活动、订阅方案和模型额度，并可用指定账号打开 Codex。
 
 ## 当前能力
 
-- 使用与 Quotio 相同的 CLIProxyAPIPlus OAuth 流程跳转 OpenAI 网站，不输入 API Key
+- 使用 Codex 官方 app-server OAuth 流程，不输入 API Key
 - 登录时自动打开默认浏览器，支持重新打开浏览器、取消并重新登录
-- 登录窗口打开时预启动认证服务；使用本地成功回调，不唤起官方 Codex 应用
-- 登录专用进程关闭插件与 Apps 预热，减少浏览器打开前的等待
-- 使用 macOS Launch Services 命令启动默认浏览器，并在失败时显示明确错误
-- 参考 Quotio：通过 NSWorkspace 解析默认浏览器，再按 Bundle ID 显式投递 OAuth URL
+- 每个账号使用独立的 `CODEX_HOME`，认证、刷新和本地状态互不干扰
+- 旧版本 CLIProxyAPIPlus 账号会在首次刷新时迁移到标准 Codex 认证格式
 - 自动读取 ChatGPT 方案类型、Codex 额度百分比和恢复时间
-- 每个账号使用独立的 CLIProxyAPI 认证空间，支持多账号
 - 多账号汇总或单账号查看
 - 7/30 天 Token 趋势图，支持指针交互查看每日数据
+- 按日期列出每个账号的每日 Token 使用量
+- 在账号卡片中一键用该账号打开独立 Codex 实例
+- 支持对已有账号重新进行官方授权
 - 菜单栏快速查看 Token 与各账号剩余额度
 - 仪表盘每 15 分钟自动刷新，打开菜单栏时也会检查数据新鲜度
 
@@ -21,7 +21,7 @@
 
 ## 构建与运行
 
-要求 Apple Silicon Mac 与 macOS 14 或更高版本。CLIProxyAPIPlus 已随应用打包。
+要求 Apple Silicon Mac、macOS 14 或更高版本，以及已安装的 Codex macOS 应用。看板使用 Codex 应用内附带且与当前版本匹配的 app-server。
 
 ```sh
 swift run CodexMeter
@@ -35,3 +35,13 @@ open "dist/Codex Monitor.app"
 ```
 
 如果需要在其他 Mac 上分发，请使用自己的 Apple Developer 证书替换脚本中的临时签名，并完成公证。
+
+## 多账号工作方式
+
+每个账号都保存在 `~/Library/Application Support/CodexMonitor/Accounts/<账号ID>/CodexHome`。刷新时应用为每个账号启动短生命周期 app-server，并分别调用：
+
+- `account/read`
+- `account/rateLimits/read`
+- `account/usage/read`
+
+“用此账号打开 Codex”会创建新的 Codex 应用实例，并只为该实例设置对应的 `CODEX_HOME`。用户默认的 `~/.codex` 登录不会被覆盖。

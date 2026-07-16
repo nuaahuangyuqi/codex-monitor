@@ -17,10 +17,25 @@ final class DashboardModel: ObservableObject {
             for account in accounts {
                 group.addTask {
                     do {
-                        let result = try await QuotioAccountService.refresh(accountID: account.id)
-                        let cutoff = Calendar.current.date(byAdding: .day, value: -days + 1, to: Calendar.current.startOfDay(for: .now)) ?? .distantPast
-                        let points = result.dailyUsage.filter { $0.date >= cutoff }.map {
-                            UsagePoint(date: $0.date, requests: 0, inputTokens: $0.tokens, outputTokens: 0, cost: 0)
+                        let result = try await CodexAccountService.refresh(accountID: account.id)
+                        let calendar = Calendar.current
+                        let today = calendar.startOfDay(for: .now)
+                        let cutoff = calendar.date(byAdding: .day, value: -days + 1, to: today) ?? .distantPast
+                        let usageByDay = Dictionary(
+                            result.dailyUsage.filter { $0.date >= cutoff }.map {
+                                (calendar.startOfDay(for: $0.date), $0.tokens)
+                            },
+                            uniquingKeysWith: +
+                        )
+                        let points = (0..<days).compactMap { offset -> UsagePoint? in
+                            guard let date = calendar.date(byAdding: .day, value: offset, to: cutoff) else { return nil }
+                            return UsagePoint(
+                                date: date,
+                                requests: 0,
+                                inputTokens: usageByDay[date] ?? 0,
+                                outputTokens: 0,
+                                cost: 0
+                            )
                         }
                         return AccountSnapshot(
                             accountID: account.id,
@@ -51,8 +66,6 @@ final class DashboardModel: ObservableObject {
                 snapshots[snapshot.accountID] = snapshot
             }
         }
-        let validIDs = Set(accounts.map(\.id))
-        snapshots = snapshots.filter { validIDs.contains($0.key) }
     }
 
     func remove(accountID: UUID) {
