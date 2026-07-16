@@ -12,7 +12,7 @@ struct CodexMeterApp: App {
     }
 
     var body: some Scene {
-        Window("大同", id: "dashboard") {
+        Window("Codex 账号仪表盘", id: "dashboard") {
             MainView(store: store, dashboard: dashboard)
                 .frame(minWidth: 900, minHeight: 620)
         }

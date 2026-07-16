@@ -134,7 +134,7 @@ struct MainView: View {
             }
             .padding(12)
         }
-        .navigationTitle("大同")
+        .navigationTitle("账号管理")
         .frame(minWidth: 220)
     }
 

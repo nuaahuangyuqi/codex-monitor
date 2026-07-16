@@ -5,8 +5,9 @@ ROOT="${0:A:h:h}"
 cd "$ROOT"
 
 APP_NAME="大同"
-VERSION="${APP_VERSION:-1.4.3}"
-BUILD_NUMBER="${APP_BUILD:-9}"
+DISPLAY_NAME="Codex 账号仪表盘"
+VERSION="${APP_VERSION:-1.4.5}"
+BUILD_NUMBER="${APP_BUILD:-11}"
 ARM_SCRATCH="$ROOT/.build/release-arm64"
 X86_SCRATCH="$ROOT/.build/release-x86_64"
 
@@ -30,8 +31,8 @@ cp "$ROOT/Sources/CodexMeter/Resources/AppIcon/AppIconDefault.png" "$CONTENTS/Re
 cp "$ROOT/Sources/CodexMeter/Resources/AppIcon/AppIconDark.png" "$CONTENTS/Resources/AppIcon/AppIconDark.png"
 cp "$ROOT/Sources/CodexMeter/Resources/AppIcon/AppIconMono.png" "$CONTENTS/Resources/AppIcon/AppIconMono.png"
 
-/usr/libexec/PlistBuddy -c "Add :CFBundleName string $APP_NAME" \
-  -c "Add :CFBundleDisplayName string $APP_NAME" \
+/usr/libexec/PlistBuddy -c "Add :CFBundleName string $DISPLAY_NAME" \
+  -c "Add :CFBundleDisplayName string $DISPLAY_NAME" \
   -c 'Add :CFBundleIdentifier string com.codexmeter.macos' \
   -c "Add :CFBundleVersion string $BUILD_NUMBER" \
   -c "Add :CFBundleShortVersionString string $VERSION" \

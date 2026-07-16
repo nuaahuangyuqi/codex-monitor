@@ -6,11 +6,9 @@ final class AppIconController {
     private var appearanceObservation: NSKeyValueObservation?
 
     func start() {
-        // macOS 26 会从 bundle 图标自动生成 Dark/Clear/Tinted 外观。
-        // 不在运行时覆盖 applicationIconImage，以免阻断系统外观。
-        if #available(macOS 26.0, *) { return }
+        updateIcon()
         guard appearanceObservation == nil else { return }
-        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.initial, .new]) { _, _ in
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
             Task { @MainActor in AppIconController.shared.updateIcon() }
         }
     }
@@ -36,6 +34,7 @@ final class AppIconController {
             withExtension: "png",
             subdirectory: "AppIcon"
         ), let image = NSImage(contentsOf: url) else { return }
+        image.isTemplate = false
         NSApp.applicationIconImage = image
     }
 }

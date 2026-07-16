@@ -12,7 +12,7 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("大同").font(.headline)
+                    Text("账号用量").font(.headline)
                     Text(dashboard.days == 7 ? "当前 7 天额度周期" : "最近 30 天")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -105,7 +105,7 @@ struct MenuBarView: View {
 
     private func showDashboard() {
         if let window = NSApp.windows.first(where: {
-            $0.title == "大同" && ($0.isVisible || $0.isMiniaturized)
+            $0.title == "Codex 账号仪表盘" && ($0.isVisible || $0.isMiniaturized)
         }) {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
