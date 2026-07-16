@@ -11,6 +11,7 @@ enum CodexAppServerError: LocalizedError {
     case rpc(String)
     case notAuthenticated
     case loginFailed(String)
+    case historyMigrationFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -32,6 +33,8 @@ enum CodexAppServerError: LocalizedError {
             return "账号尚未完成 Codex 官方授权，请重新登录"
         case .loginFailed(let message):
             return message
+        case .historyMigrationFailed(let message):
+            return "合并 Codex 对话历史失败：\(message)"
         }
     }
 }
@@ -190,6 +193,104 @@ enum CodexBinaryLocator {
         ]
         return candidates.first { manager.isExecutableFile(atPath: $0.path) }
     }
+}
+
+enum CodexConversationStore {
+    static func sharedHomeURL() -> URL {
+        if let configured = ProcessInfo.processInfo.environment["CODEX_SQLITE_HOME"], !configured.isEmpty {
+            return URL(fileURLWithPath: configured).standardizedFileURL
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
+    }
+
+    static func mergeAccountHistoryIfNeeded(accountHome: URL, sharedHome: URL) async throws {
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try mergeSynchronously(accountHome: accountHome, sharedHome: sharedHome)
+            }.value
+        } catch let error as CodexAppServerError {
+            throw error
+        } catch {
+            throw CodexAppServerError.historyMigrationFailed(error.localizedDescription)
+        }
+    }
+
+    private static func mergeSynchronously(accountHome: URL, sharedHome: URL) throws {
+        let manager = FileManager.default
+        let source = accountHome.appendingPathComponent("state_5.sqlite")
+        let destination = sharedHome.appendingPathComponent("state_5.sqlite")
+        guard source.standardizedFileURL != destination.standardizedFileURL,
+              manager.fileExists(atPath: source.path),
+              manager.fileExists(atPath: destination.path) else { return }
+
+        let sourcePath = sqlQuoted(source.path)
+        let countSQL = """
+        ATTACH DATABASE '\(sourcePath)' AS account_state;
+        SELECT COUNT(*)
+        FROM account_state.threads AS source
+        WHERE NOT EXISTS (SELECT 1 FROM main.threads AS target WHERE target.id = source.id);
+        """
+        let countText = try runSQLite(database: destination, command: countSQL)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let missingCount = Int(countText), missingCount > 0 else { return }
+
+        let backupDirectory = accountHome.appendingPathComponent("migration-backups", isDirectory: true)
+        try manager.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        try manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: backupDirectory.path)
+        let stamp = backupFormatter.string(from: .now)
+        let backup = backupDirectory.appendingPathComponent("shared-state-before-merge-\(stamp).sqlite")
+        _ = try runSQLite(database: destination, command: ".backup '\(sqlQuoted(backup.path))'")
+        try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: backup.path)
+
+        let mergeSQL = """
+        PRAGMA busy_timeout = 10000;
+        ATTACH DATABASE '\(sourcePath)' AS account_state;
+        BEGIN IMMEDIATE;
+        INSERT OR IGNORE INTO main.threads SELECT * FROM account_state.threads;
+        INSERT OR IGNORE INTO main.thread_dynamic_tools SELECT * FROM account_state.thread_dynamic_tools;
+        INSERT OR IGNORE INTO main.thread_spawn_edges SELECT * FROM account_state.thread_spawn_edges;
+        INSERT OR IGNORE INTO main.agent_jobs SELECT * FROM account_state.agent_jobs;
+        INSERT OR IGNORE INTO main.agent_job_items SELECT * FROM account_state.agent_job_items;
+        COMMIT;
+        """
+        _ = try runSQLite(database: destination, command: mergeSQL)
+    }
+
+    private static func runSQLite(database: URL, command: String) throws -> String {
+        let executable = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+            throw CodexAppServerError.historyMigrationFailed("系统缺少 sqlite3")
+        }
+        let process = Process()
+        let output = Pipe()
+        let errors = Pipe()
+        process.executableURL = executable
+        process.arguments = [database.path, command]
+        process.standardOutput = output
+        process.standardError = errors
+        do { try process.run() }
+        catch { throw CodexAppServerError.historyMigrationFailed(error.localizedDescription) }
+        process.waitUntilExit()
+        let outputData = output.fileHandleForReading.readDataToEndOfFile()
+        let errorData = errors.fileHandleForReading.readDataToEndOfFile()
+        guard process.terminationStatus == 0 else {
+            let message = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw CodexAppServerError.historyMigrationFailed(message?.isEmpty == false ? message! : "sqlite3 返回 \(process.terminationStatus)")
+        }
+        return String(data: outputData, encoding: .utf8) ?? ""
+    }
+
+    private static func sqlQuoted(_ value: String) -> String {
+        value.replacingOccurrences(of: "'", with: "''")
+    }
+
+    private static let backupFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter
+    }()
 }
 
 actor CodexAppServerClient {
@@ -543,12 +644,14 @@ enum CodexDesktopLauncher {
             throw CodexAppServerError.appMissing
         }
         let home = try CodexAccountHome.url(for: accountID)
+        let sharedHome = CodexConversationStore.sharedHomeURL()
+        try await CodexConversationStore.mergeAccountHistoryIfNeeded(accountHome: home, sharedHome: sharedHome)
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
         configuration.activates = true
         configuration.environment = [
             "CODEX_HOME": home.path,
-            "CODEX_SQLITE_HOME": home.path
+            "CODEX_SQLITE_HOME": sharedHome.path
         ]
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in

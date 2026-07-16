@@ -338,7 +338,7 @@ struct AccountStatusCard: View {
             Divider()
 
             HStack {
-                Label("独立账号空间", systemImage: "person.crop.circle.badge.checkmark")
+                Label("账号隔离 · 对话共享", systemImage: "person.crop.circle.badge.checkmark")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()

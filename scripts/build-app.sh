@@ -15,8 +15,8 @@ cp "$ROOT/.build/release/CodexMeter" "$CONTENTS/MacOS/CodexMeter"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleName string Codex Monitor' \
   -c 'Add :CFBundleDisplayName string Codex Monitor' \
   -c 'Add :CFBundleIdentifier string com.codexmeter.macos' \
-  -c 'Add :CFBundleVersion string 1' \
-  -c 'Add :CFBundleShortVersionString string 1.0.0' \
+  -c 'Add :CFBundleVersion string 2' \
+  -c 'Add :CFBundleShortVersionString string 1.1.0' \
   -c 'Add :CFBundleExecutable string CodexMeter' \
   -c 'Add :CFBundlePackageType string APPL' \
   -c 'Add :LSMinimumSystemVersion string 14.0' \

@@ -7,6 +7,7 @@
 - 使用 Codex 官方 app-server OAuth 流程，不输入 API Key
 - 登录时自动打开默认浏览器，支持重新打开浏览器、取消并重新登录
 - 每个账号使用独立的 `CODEX_HOME`，认证、刷新和本地状态互不干扰
+- 所有账号共享默认 Codex 对话数据库，切换账号不会隐藏原有对话
 - 旧版本 CLIProxyAPIPlus 账号会在首次刷新时迁移到标准 Codex 认证格式
 - 自动读取 ChatGPT 方案类型、Codex 额度百分比和恢复时间
 - 多账号汇总或单账号查看
@@ -44,4 +45,4 @@ open "dist/Codex Monitor.app"
 - `account/rateLimits/read`
 - `account/usage/read`
 
-“用此账号打开 Codex”会创建新的 Codex 应用实例，并只为该实例设置对应的 `CODEX_HOME`。用户默认的 `~/.codex` 登录不会被覆盖。
+“用此账号打开 Codex”会创建新的 Codex 应用实例，并只为该实例设置对应的 `CODEX_HOME`。认证信息按账号隔离，但 `CODEX_SQLITE_HOME` 指向默认的 `~/.codex`，所以所有账号看到同一份对话列表。旧版账号目录中独有的会话会先备份并合并到共享数据库，用户默认登录不会被覆盖。
