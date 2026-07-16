@@ -1,4 +1,4 @@
-# Codex Monitor for macOS
+# 大同 for macOS
 
 原生 SwiftUI 菜单栏应用，通过 Codex 官方 app-server 集中查看多个 ChatGPT 账号的 Token 活动、订阅方案和模型额度，并可用指定账号打开 Codex。
 
@@ -11,12 +11,14 @@
 - 旧版本 CLIProxyAPIPlus 账号会在首次刷新时迁移到标准 Codex 认证格式
 - 自动读取 ChatGPT 方案类型、Codex 额度百分比和恢复时间
 - 多账号汇总或单账号查看
-- 7/30 天 Token 趋势图，支持指针交互查看每日数据
-- 按日期列出每个账号的每日 Token 使用量
+- 交互式每日 Token 堆叠柱状图，可选中日期查看各账号明细
+- 首次打开只刷新一次 30 天数据；30 天视图截至今天，7 天视图以官方额度恢复日为终点展示完整周期（未到日期显示为 0）
+- 刷新周期 Token 用官方历史累计值的两次刷新差额计算，不受图表时间范围影响
 - 在账号卡片中一键切换原生凭据并打开 Codex，失败时自动回滚
 - 支持对已有账号重新进行官方授权
-- 菜单栏快速查看 Token 与各账号剩余额度
-- 仪表盘每 15 分钟自动刷新，打开菜单栏时也会检查数据新鲜度
+- 菜单栏快速查看 Token 与剩余额度，并可在每个账号后直接打开 Codex
+- 除首次打开外仅在用户点击刷新时更新网络数据
+- 包含 macOS 应用图标、深色模式图标和高对比度单色图标，macOS 26 可继续生成系统着色/透明外观
 
 > ChatGPT 网页登录不会返回 OpenAI Platform 组织的 API 调用次数或美元费用。这两项仅能通过组织 Admin Key 的 Usage/Costs API 获取，因此“只允许网页登录”模式下应用不会伪造或估算它们。续费日期也不在当前官方账号协议返回范围内。
 
@@ -28,14 +30,28 @@
 swift run CodexMeter
 ```
 
-生成可双击运行的 `.app`：
+生成同时支持 Apple Silicon 和 Intel Mac 的通用 `.app`：
 
 ```sh
 ./scripts/build-app.sh
-open "dist/Codex Monitor.app"
+open "dist/大同.app"
 ```
 
-如果需要在其他 Mac 上分发，请使用自己的 Apple Developer 证书替换脚本中的临时签名，并完成公证。
+生成包含“拖入应用程序”安装方式的 DMG：
+
+```sh
+./scripts/build-dmg.sh
+```
+
+会输出 `dist/大同-1.4.0-universal.dmg`。为了在任意 Mac 上无 Gatekeeper 警告地正式分发，需要 Apple Developer Program 的 Developer ID Application 证书和 `notarytool` 公证凭据：
+
+```sh
+DEVELOPER_ID_APPLICATION="Developer ID Application: 你的名称 (TEAMID)" \
+NOTARY_PROFILE="datong-notary" \
+./scripts/build-dmg.sh
+```
+
+当未设置证书时，脚本仍会生成临时签名 DMG，但该产物不应视为正式公证发行版。
 
 ## 多账号工作方式
 

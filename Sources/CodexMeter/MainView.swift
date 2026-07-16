@@ -52,7 +52,7 @@ struct MainView: View {
         }
         .sheet(isPresented: $showingLogin) {
             AccountLoginView(store: store, account: loginAccount) {
-                Task { await dashboard.refresh(accounts: store.accounts) }
+                // 新增或重新授权后不自动发起网络刷新，由用户点击刷新。
             }
         }
         .alert("无法打开 Codex", isPresented: Binding(
@@ -81,18 +81,7 @@ struct MainView: View {
             Text("该账号在本机保存的 Codex 登录凭据和监控记录也会被删除。")
         }
         .task {
-            await dashboard.refresh(accounts: store.accounts)
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(nanoseconds: 15 * 60 * 1_000_000_000)
-                } catch {
-                    break
-                }
-                await dashboard.refresh(accounts: store.accounts)
-            }
-        }
-        .onChange(of: dashboard.days) {
-            Task { await dashboard.refresh(accounts: visibleAccounts) }
+            await dashboard.refreshInitial30Days(accounts: store.accounts)
         }
     }
 
@@ -145,7 +134,7 @@ struct MainView: View {
             }
             .padding(12)
         }
-        .navigationTitle("Codex Monitor")
+        .navigationTitle("大同")
         .frame(minWidth: 220)
     }
 

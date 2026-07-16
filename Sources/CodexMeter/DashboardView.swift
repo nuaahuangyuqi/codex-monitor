@@ -18,7 +18,6 @@ struct DashboardView: View {
                 summary
                 availabilityNote
                 chartCard
-                usageTableCard
 
                 if accounts.count > 1 {
                     Text("账号概览")
@@ -54,7 +53,9 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(accounts.count == 1 ? accounts[0].name : "全部账号")
                     .font(.largeTitle.weight(.bold))
-                Text("最近 \(days) 天 · \(accounts.count) 个账号")
+                Text(days == 7
+                     ? "当前 7 天额度恢复周期 · \(accounts.count) 个账号"
+                     : "最近 30 天 · \(accounts.count) 个账号")
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -68,7 +69,7 @@ struct DashboardView: View {
 
     private var summary: some View {
         HStack(spacing: 14) {
-            MetricCard(title: "周期 Token", value: Formatters.count(snapshots.totalTokens), icon: "text.word.spacing", tint: .blue)
+            MetricCard(title: "刷新周期 Token", value: Formatters.count(snapshots.totalCycleTokens), icon: "text.word.spacing", tint: .blue)
             MetricCard(title: "历史 Token", value: Formatters.count(snapshots.compactMap(\.lifetimeTokens).reduce(0, +)), icon: "clock.arrow.circlepath", tint: .purple)
             MetricCard(title: "单日峰值", value: Formatters.count(snapshots.compactMap(\.peakDailyTokens).max() ?? 0), icon: "chart.line.uptrend.xyaxis", tint: .teal)
             MetricCard(title: "账号", value: "\(accounts.count)", icon: "person.2.fill", tint: .orange)
@@ -76,7 +77,7 @@ struct DashboardView: View {
     }
 
     private var availabilityNote: some View {
-        Label("网页登录可同步 ChatGPT/Codex 方案、Token 活动和模型额度。API 调用次数与美元费用属于 OpenAI Platform 组织接口，网页登录不会返回这两项。", systemImage: "info.circle.fill")
+        Label("刷新周期 Token 是上次刷新到本次刷新之间的新增量；7/30 天只改变本地图表范围。API 调用次数与美元费用不在网页登录返回范围内。", systemImage: "info.circle.fill")
             .font(.callout)
             .foregroundStyle(.secondary)
             .padding(12)
@@ -88,7 +89,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("趋势")
+                    Text("每日使用量")
                         .font(.headline)
                     Text(selectedValueText)
                         .font(.caption)
@@ -103,90 +104,56 @@ struct DashboardView: View {
             }
 
             if series.isEmpty {
-                ContentUnavailableView("暂无 Token 活动", systemImage: "chart.xyaxis.line", description: Text("完成 ChatGPT 官方登录后刷新，或检查账号错误提示。"))
+                ContentUnavailableView("暂无 Token 活动", systemImage: "chart.bar.xaxis", description: Text("完成 ChatGPT 官方登录后点击刷新，或检查账号错误提示。"))
                     .frame(height: 230)
             } else {
-                Chart(series) { point in
-                    LineMark(
-                        x: .value("日期", point.date),
-                        y: .value("Token", point.value)
-                    )
-                    .foregroundStyle(by: .value("账号", point.accountName))
-                    .interpolationMethod(.catmullRom)
-
-                    AreaMark(
-                        x: .value("日期", point.date),
-                        y: .value("Token", point.value)
-                    )
-                    .foregroundStyle(by: .value("账号", point.accountName))
-                    .opacity(accounts.count == 1 ? 0.10 : 0.025)
-
-                    if let selectedDate, Calendar.current.isDate(point.date, inSameDayAs: selectedDate) {
-                        PointMark(x: .value("日期", point.date), y: .value("Token", point.value))
-                            .foregroundStyle(by: .value("账号", point.accountName))
-                            .symbolSize(70)
+                Chart {
+                    ForEach(series) { point in
+                        BarMark(
+                            x: .value("日期", point.date),
+                            y: .value("Token", point.value),
+                            stacking: .standard
+                        )
+                        .foregroundStyle(by: .value("账号", point.accountName))
+                        .position(by: .value("账号", point.accountName))
+                        .opacity(isSelected(point.date) ? 1 : (selectedDate == nil ? 0.88 : 0.35))
+                    }
+                    if let selectedDate {
+                        RuleMark(x: .value("选中日期", selectedDate))
+                            .foregroundStyle(.secondary.opacity(0.7))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     }
                 }
                 .chartForegroundStyleScale(domain: accounts.map(\.name), range: accounts.map { AppPalette.color(for: $0.colorIndex) })
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 7)) }
+                .chartXAxis { AxisMarks(values: .automatic(desiredCount: days == 7 ? 7 : 8)) }
                 .chartYScale(domain: .automatic(includesZero: true))
                 .chartXSelection(value: $selectedDate)
+                .chartLegend(position: .bottom, alignment: .leading, spacing: 12)
                 .frame(height: 260)
-            }
-        }
-        .padding(18)
-        .background(.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.separator.opacity(0.35), lineWidth: 1))
-    }
-
-    private var usageTableCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("每日使用量")
-                        .font(.headline)
-                    Text("按日期列出各账号的 Codex Token 活动")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text("\(usageRows.count) 条")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if usageRows.isEmpty {
-                ContentUnavailableView(
-                    "暂无每日数据",
-                    systemImage: "tablecells",
-                    description: Text("刷新账号后，每日 Token 使用量会显示在这里。")
-                )
-                .frame(height: 150)
-            } else {
-                Table(usageRows) {
-                    TableColumn("日期") { row in
-                        Text(row.date.formatted(date: .abbreviated, time: .omitted))
-                            .monospacedDigit()
-                    }
-                    .width(min: 120, ideal: 150)
-
-                    TableColumn("账号") { row in
-                        HStack(spacing: 7) {
-                            Circle()
-                                .fill(AppPalette.color(for: row.colorIndex))
-                                .frame(width: 7, height: 7)
-                            Text(row.accountName)
+                if let selectedDate {
+                    HStack(spacing: 14) {
+                        ForEach(selectedPoints) { point in
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(color(for: point.accountName))
+                                    .frame(width: 7, height: 7)
+                                Text(point.accountName)
+                                    .foregroundStyle(.secondary)
+                                Text(Formatters.count(Int(point.value)))
+                                    .fontWeight(.semibold)
+                                    .monospacedDigit()
+                            }
+                            .font(.caption)
                         }
+                        Spacer()
+                        Button("清除选择") { self.selectedDate = nil }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-
-                    TableColumn("Token") { row in
-                        Text(Formatters.count(row.tokens))
-                            .monospacedDigit()
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                    .width(min: 100, ideal: 130)
+                    .padding(.horizontal, 2)
+                    .accessibilityLabel("\(selectedDate.formatted(date: .long, time: .omitted)) 使用量明细")
                 }
-                .frame(height: min(CGFloat(usageRows.count * 34 + 34), 310))
             }
         }
         .padding(18)
@@ -195,41 +162,58 @@ struct DashboardView: View {
     }
 
     private var series: [ChartSeriesPoint] {
-        accounts.flatMap { account in
-            (snapshot(for: account.id)?.points ?? []).map { point in
-                ChartSeriesPoint(accountName: account.name, date: point.date, value: Double(point.totalTokens))
+        return accounts.flatMap { account -> [ChartSeriesPoint] in
+            guard let snapshot = snapshot(for: account.id) else { return [] }
+            let points = days == 7 ? quotaCyclePoints(from: snapshot) : snapshot.points
+            return points.map {
+                ChartSeriesPoint(accountName: account.name, date: $0.date, value: Double($0.totalTokens))
             }
         }
     }
 
-    private var usageRows: [UsageTableRow] {
-        accounts.flatMap { account in
-            (snapshot(for: account.id)?.points ?? []).map { point in
-                UsageTableRow(
-                    accountID: account.id,
-                    accountName: account.name,
-                    colorIndex: account.colorIndex,
-                    date: point.date,
-                    tokens: point.totalTokens
-                )
-            }
+    private func quotaCyclePoints(from snapshot: AccountSnapshot) -> [UsagePoint] {
+        let calendar = Calendar.current
+        let end = calendar.startOfDay(for: snapshot.quotaResetDate ?? .now)
+        let start = calendar.date(byAdding: .day, value: -6, to: end) ?? end
+        let usageByDay = Dictionary(
+            uniqueKeysWithValues: snapshot.points.map { (calendar.startOfDay(for: $0.date), $0) }
+        )
+        return (0..<7).compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
+            return usageByDay[date] ?? UsagePoint(
+                date: date,
+                requests: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+                cost: 0
+            )
         }
-        .sorted {
-            if $0.date != $1.date { return $0.date > $1.date }
-            return $0.accountName.localizedStandardCompare($1.accountName) == .orderedAscending
-        }
+    }
+
+    private var selectedPoints: [ChartSeriesPoint] {
+        guard let selectedDate else { return [] }
+        return series.filter { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) }
     }
 
     private var selectedValueText: String {
         guard let selectedDate else { return "移动指针查看每日明细" }
-        let points = series.filter { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) }
-        let value = points.reduce(0) { $0 + $1.value }
+        let value = selectedPoints.reduce(0) { $0 + $1.value }
         let formatted = Formatters.count(Int(value))
         return "\(selectedDate.formatted(date: .abbreviated, time: .omitted)) · 合计 \(formatted)"
     }
 
     private func snapshot(for id: UUID) -> AccountSnapshot? {
         snapshots.first { $0.accountID == id }
+    }
+
+    private func isSelected(_ date: Date) -> Bool {
+        guard let selectedDate else { return false }
+        return Calendar.current.isDate(date, inSameDayAs: selectedDate)
+    }
+
+    private func color(for accountName: String) -> Color {
+        guard let account = accounts.first(where: { $0.name == accountName }) else { return .accentColor }
+        return AppPalette.color(for: account.colorIndex)
     }
 }
 
@@ -238,15 +222,6 @@ private struct ChartSeriesPoint: Identifiable {
     let date: Date
     let value: Double
     var id: String { "\(accountName)-\(date.timeIntervalSince1970)" }
-}
-
-private struct UsageTableRow: Identifiable {
-    let accountID: UUID
-    let accountName: String
-    let colorIndex: Int
-    let date: Date
-    let tokens: Int
-    var id: String { "\(accountID.uuidString)-\(date.timeIntervalSince1970)" }
 }
 
 private struct MetricCard: View {
@@ -303,7 +278,7 @@ struct AccountStatusCard: View {
                     .lineLimit(2)
             } else {
                 HStack {
-                    stat("周期 Token", Formatters.count(snapshot?.totalTokens ?? 0))
+                    stat("周期 Token", Formatters.count(snapshot?.cycleTokens ?? 0))
                     Divider().frame(height: 28)
                     stat("历史 Token", Formatters.count(snapshot?.lifetimeTokens ?? 0))
                     Divider().frame(height: 28)

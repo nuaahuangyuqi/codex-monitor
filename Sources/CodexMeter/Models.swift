@@ -94,6 +94,8 @@ struct AccountSnapshot: Sendable {
     var lifetimeTokens: Int? = nil
     var peakDailyTokens: Int? = nil
     var currentStreakDays: Int? = nil
+    var cycleTokens: Int? = nil
+    var cycleStartedAt: Date? = nil
 
     var requests: Int { points.reduce(0) { $0 + $1.requests } }
     var inputTokens: Int { points.reduce(0) { $0 + $1.inputTokens } }
@@ -106,6 +108,7 @@ extension Array where Element == AccountSnapshot {
     var totalRequests: Int { reduce(0) { $0 + $1.requests } }
     var totalTokens: Int { reduce(0) { $0 + $1.totalTokens } }
     var totalCost: Double { reduce(0) { $0 + $1.cost } }
+    var totalCycleTokens: Int { compactMap(\.cycleTokens).reduce(0, +) }
 }
 
 enum AppPalette {

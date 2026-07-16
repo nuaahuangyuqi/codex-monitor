@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct CodexMeterApp: App {
+    @NSApplicationDelegateAdaptor(CodexMeterAppDelegate.self) private var appDelegate
     @StateObject private var store: AccountStore
     @StateObject private var dashboard: DashboardModel
 
@@ -11,7 +12,7 @@ struct CodexMeterApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Codex Monitor", id: "dashboard") {
+        Window("大同", id: "dashboard") {
             MainView(store: store, dashboard: dashboard)
                 .frame(minWidth: 900, minHeight: 620)
         }
@@ -28,6 +29,6 @@ struct CodexMeterApp: App {
     private var menuBarTitle: String {
         let snapshots = store.accounts.compactMap { dashboard.snapshots[$0.id] }
         guard !snapshots.isEmpty else { return "Codex" }
-        return "\(Formatters.count(snapshots.totalTokens)) T"
+        return "\(Formatters.count(snapshots.totalCycleTokens)) T"
     }
 }

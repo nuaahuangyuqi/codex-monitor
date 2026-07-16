@@ -372,7 +372,7 @@ actor CodexAppServerClient {
         _ = try await request("initialize", params: .object([
             "clientInfo": .object([
                 "name": .string("codex_monitor"),
-                "title": .string("Codex Monitor"),
+                "title": .string("大同"),
                 "version": .string("1.0")
             ]),
             "capabilities": .object([:])
