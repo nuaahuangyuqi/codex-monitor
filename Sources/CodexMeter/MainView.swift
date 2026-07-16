@@ -148,6 +148,9 @@ struct MainView: View {
                                     .padding(.horizontal, 11)
                                     .padding(.vertical, 9)
                                     .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    )
                                 }
                                 .buttonStyle(.plain)
                                 .appGlassPanel(
@@ -267,6 +270,9 @@ struct MainView: View {
             .padding(.horizontal, 11)
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
         }
         .buttonStyle(.plain)
         .appGlassPanel(

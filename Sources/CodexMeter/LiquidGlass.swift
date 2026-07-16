@@ -99,21 +99,21 @@ private struct AppGlassCapsuleModifier: ViewModifier {
 }
 
 private struct AppFrostedControlBarModifier: ViewModifier {
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
-            .background {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(nsColor: .windowBackgroundColor))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(.regularMaterial)
-                    }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(.white.opacity(0.24), lineWidth: 0.8)
-            }
-            .shadow(color: .black.opacity(0.12), radius: 14, y: 5)
+        if #available(macOS 26.0, *) {
+            content.glassEffect(
+                Glass.regular.tint(
+                    Color(nsColor: .windowBackgroundColor).opacity(0.84)
+                ),
+                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+            )
+        } else {
+            content.background(
+                .regularMaterial,
+                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+            )
+        }
     }
 }
 

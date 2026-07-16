@@ -43,7 +43,7 @@ open "dist/归一.app"
 ./scripts/build-dmg.sh
 ```
 
-会输出 `dist/归一-2.0.2-universal.dmg`。为了在任意 Mac 上无 Gatekeeper 警告地正式分发，需要 Apple Developer Program 的 Developer ID Application 证书和 `notarytool` 公证凭据：
+会输出 `dist/归一-2.0.3-universal.dmg`。为了在任意 Mac 上无 Gatekeeper 警告地正式分发，需要 Apple Developer Program 的 Developer ID Application 证书和 `notarytool` 公证凭据：
 
 ```sh
 DEVELOPER_ID_APPLICATION="Developer ID Application: 你的名称 (TEAMID)" \
