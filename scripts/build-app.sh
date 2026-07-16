@@ -4,10 +4,10 @@ set -euo pipefail
 ROOT="${0:A:h:h}"
 cd "$ROOT"
 
-APP_NAME="大同"
-DISPLAY_NAME="Codex 账号仪表盘"
-VERSION="${APP_VERSION:-2.0.0}"
-BUILD_NUMBER="${APP_BUILD:-12}"
+APP_NAME="归一"
+DISPLAY_NAME="归一"
+VERSION="${APP_VERSION:-2.0.1}"
+BUILD_NUMBER="${APP_BUILD:-13}"
 ARM_SCRATCH="$ROOT/.build/release-arm64"
 X86_SCRATCH="$ROOT/.build/release-x86_64"
 
@@ -19,6 +19,7 @@ X86_BIN_DIR="$(swift build -c release --triple x86_64-apple-macosx14.0 --scratch
 
 APP="$ROOT/dist/$APP_NAME.app"
 CONTENTS="$APP/Contents"
+rm -rf "$ROOT/dist/大同.app"
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources/AppIcon"
 lipo -create \

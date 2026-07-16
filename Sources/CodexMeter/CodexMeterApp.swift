@@ -19,7 +19,7 @@ struct CodexMeterApp: App {
     }
 
     var body: some Scene {
-        Window("Codex 账号仪表盘", id: "dashboard") {
+        Window("归一", id: "dashboard") {
             LaunchSequenceView(
                 store: store,
                 dashboard: dashboard,

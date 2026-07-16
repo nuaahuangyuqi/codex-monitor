@@ -26,10 +26,10 @@ struct LaunchSequenceView: View {
             }
 
             if showSplash && !presentation.hasPlayed {
-                Text("天下大同")
-                    .font(.custom("Kaiti SC", size: 64).weight(.medium))
-                    .tracking(18)
-                    .padding(.leading, 18)
+                Text("聚散万千，终归于一")
+                    .font(.custom("Kaiti SC", size: 50).weight(.medium))
+                    .tracking(8)
+                    .padding(.leading, 8)
                     .foregroundStyle(
                         LinearGradient(
                             colors: [.cyan, .blue, .purple],

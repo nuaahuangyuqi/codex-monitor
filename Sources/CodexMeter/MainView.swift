@@ -27,34 +27,39 @@ struct MainView: View {
         .navigationSplitViewStyle(.balanced)
         .toolbar {
             if activeSelection != .settings {
-                ToolbarItemGroup {
-                    Picker("时间范围", selection: $dashboard.days) {
-                        Text("7 天").tag(7)
-                        Text("30 天").tag(30)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 126)
-
-                    Button {
-                        Task { await dashboard.refresh(accounts: visibleAccounts) }
-                    } label: {
-                        if dashboard.isRefreshing {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("刷新", systemImage: "arrow.clockwise")
+                ToolbarItem(placement: .primaryAction) {
+                    HStack(spacing: 8) {
+                        Picker("时间范围", selection: $dashboard.days) {
+                            Text("7 天").tag(7)
+                            Text("30 天").tag(30)
                         }
-                    }
-                    .disabled(dashboard.isRefreshing || store.accounts.isEmpty)
-                    .appGlassButton()
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(width: 126)
 
-                    Button {
-                        loginAccount = nil
-                        showingLogin = true
-                    } label: {
-                        Label("添加账号", systemImage: "plus")
+                        Button {
+                            Task { await dashboard.refresh(accounts: visibleAccounts) }
+                        } label: {
+                            if dashboard.isRefreshing {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("刷新", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .disabled(dashboard.isRefreshing || store.accounts.isEmpty)
+                        .appGlassButton()
+
+                        Button {
+                            loginAccount = nil
+                            showingLogin = true
+                        } label: {
+                            Label("添加账号", systemImage: "plus")
+                        }
+                        .appGlassButton(prominent: true)
                     }
-                    .appGlassButton(prominent: true)
+                    .padding(6)
+                    .appFrostedControlBar()
+                    .fixedSize()
                 }
             }
         }

@@ -1,4 +1,4 @@
-# 大同 for macOS
+# 归一 for macOS
 
 原生 SwiftUI 菜单栏应用，通过 Codex 官方 app-server 集中查看多个 ChatGPT 账号的 Token 活动、订阅方案和模型额度，并可用指定账号打开 Codex。
 
@@ -34,7 +34,7 @@ swift run CodexMeter
 
 ```sh
 ./scripts/build-app.sh
-open "dist/大同.app"
+open "dist/归一.app"
 ```
 
 生成包含“拖入应用程序”安装方式的 DMG：
@@ -43,11 +43,11 @@ open "dist/大同.app"
 ./scripts/build-dmg.sh
 ```
 
-会输出 `dist/大同-1.4.0-universal.dmg`。为了在任意 Mac 上无 Gatekeeper 警告地正式分发，需要 Apple Developer Program 的 Developer ID Application 证书和 `notarytool` 公证凭据：
+会输出 `dist/归一-2.0.1-universal.dmg`。为了在任意 Mac 上无 Gatekeeper 警告地正式分发，需要 Apple Developer Program 的 Developer ID Application 证书和 `notarytool` 公证凭据：
 
 ```sh
 DEVELOPER_ID_APPLICATION="Developer ID Application: 你的名称 (TEAMID)" \
-NOTARY_PROFILE="datong-notary" \
+NOTARY_PROFILE="guiyi-notary" \
 ./scripts/build-dmg.sh
 ```
 

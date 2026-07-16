@@ -98,6 +98,21 @@ private struct AppGlassCapsuleModifier: ViewModifier {
     }
 }
 
+private struct AppFrostedControlBarModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(
+                .regularMaterial,
+                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(.white.opacity(0.24), lineWidth: 0.8)
+            }
+            .shadow(color: .black.opacity(0.12), radius: 14, y: 5)
+    }
+}
+
 extension View {
     func appGlassPanel(
         cornerRadius: CGFloat = 20,
@@ -113,6 +128,10 @@ extension View {
 
     func appGlassCapsule(tint: Color? = nil, interactive: Bool = false) -> some View {
         modifier(AppGlassCapsuleModifier(tint: tint, interactive: interactive))
+    }
+
+    func appFrostedControlBar() -> some View {
+        modifier(AppFrostedControlBarModifier())
     }
 
     @ViewBuilder

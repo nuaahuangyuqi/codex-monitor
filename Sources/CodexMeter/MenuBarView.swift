@@ -114,7 +114,7 @@ struct MenuBarView: View {
 
     private func showDashboard() {
         if let window = NSApp.windows.first(where: {
-            $0.title == "Codex 账号仪表盘" && ($0.isVisible || $0.isMiniaturized)
+            $0.title == "归一" && ($0.isVisible || $0.isMiniaturized)
         }) {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.makeKeyAndOrderFront(nil)
