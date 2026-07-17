@@ -9,6 +9,7 @@ final class AccountStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         load()
+        CodexCredentialVault.migrateLegacy(accounts: accounts)
     }
 
     func upsert(_ account: AccountConfig) {
@@ -22,7 +23,7 @@ final class AccountStore: ObservableObject {
 
     func delete(_ account: AccountConfig) {
         accounts.removeAll { $0.id == account.id }
-        QuotioOAuthSession.deleteAccountHome(id: account.id)
+        CodexCredentialVault.delete(accountID: account.id)
         persist()
     }
 

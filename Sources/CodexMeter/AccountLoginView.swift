@@ -14,17 +14,23 @@ final class AccountLoginModel: ObservableObject {
     @Published var state: State = .ready
     @Published var isPreparing = false
     @Published var browserError: String?
-    private(set) var accountID = UUID()
-    private var session: QuotioOAuthSession?
+    private(set) var accountID: UUID
+    private let isExistingAccount: Bool
+    private var session: CodexOAuthSession?
     private var currentAttemptID: UUID?
     private var preparationID: UUID?
+
+    init(accountID: UUID? = nil) {
+        self.accountID = accountID ?? UUID()
+        self.isExistingAccount = accountID != nil
+    }
 
     func prepare() async {
         guard session == nil, !isPreparing, (state == .ready || isFailure) else { return }
         let id = UUID()
         preparationID = id
         isPreparing = true
-        let newSession = QuotioOAuthSession(accountID: accountID)
+        let newSession = CodexOAuthSession(accountID: accountID)
         session = newSession
         do {
             try await newSession.start()
@@ -49,7 +55,7 @@ final class AccountLoginModel: ObservableObject {
         guard !isPreparing else { return }
         state = .openingBrowser
         browserError = nil
-        let activeSession = session ?? QuotioOAuthSession(accountID: accountID)
+        let activeSession = session ?? CodexOAuthSession(accountID: accountID)
         session = activeSession
         do {
             try await activeSession.start()
@@ -59,7 +65,8 @@ final class AccountLoginModel: ObservableObject {
             guard currentAttemptID == attemptID else { return }
             await activeSession.stop()
             self.session = nil
-            let displayName = result.email?.split(separator: "@").first.map(String.init) ?? "ChatGPT 账号"
+            let existing = store.accounts.first { $0.id == accountID }
+            let displayName = existing?.name ?? result.email?.split(separator: "@").first.map(String.init) ?? "ChatGPT 账号"
             let account = AccountConfig(
                 id: accountID,
                 name: displayName,
@@ -68,7 +75,7 @@ final class AccountLoginModel: ObservableObject {
                 quotaName: result.primaryLimit?.name ?? "Codex 额度",
                 quotaUsedPercent: result.primaryLimit?.usedPercent ?? 0,
                 quotaResetDate: result.primaryLimit?.resetsAt ?? .now,
-                colorIndex: store.accounts.count
+                colorIndex: existing?.colorIndex ?? store.accounts.count
             )
             store.upsert(account)
             state = .completed
@@ -78,8 +85,10 @@ final class AccountLoginModel: ObservableObject {
             guard currentAttemptID == attemptID else { return }
             self.session = nil
             currentAttemptID = nil
-            QuotioOAuthSession.deleteAccountHome(id: accountID)
-            accountID = UUID()
+            if !isExistingAccount {
+                CodexCredentialVault.delete(accountID: accountID)
+                accountID = UUID()
+            }
             state = .failed(error.localizedDescription)
         }
     }
@@ -105,8 +114,10 @@ final class AccountLoginModel: ObservableObject {
         let activeSession = session
         session = nil
         await activeSession?.cancelActiveLogin()
-        QuotioOAuthSession.deleteAccountHome(id: accountID)
-        accountID = UUID()
+        if !isExistingAccount {
+            CodexCredentialVault.delete(accountID: accountID)
+            accountID = UUID()
+        }
         state = .ready
         await prepare()
     }
@@ -120,7 +131,9 @@ final class AccountLoginModel: ObservableObject {
         let abandonedAccountID = accountID
         Task {
             await session.cancelActiveLogin()
-            QuotioOAuthSession.deleteAccountHome(id: abandonedAccountID)
+            if !isExistingAccount {
+                CodexCredentialVault.delete(accountID: abandonedAccountID)
+            }
         }
     }
 
@@ -143,14 +156,22 @@ final class AccountLoginModel: ObservableObject {
 struct AccountLoginView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: AccountStore
-    @StateObject private var model = AccountLoginModel()
+    @StateObject private var model: AccountLoginModel
+    private let existingAccount: AccountConfig?
     let onSaved: () -> Void
+
+    init(store: AccountStore, account: AccountConfig? = nil, onSaved: @escaping () -> Void) {
+        self.store = store
+        self.existingAccount = account
+        self.onSaved = onSaved
+        _model = StateObject(wrappedValue: AccountLoginModel(accountID: account?.id))
+    }
 
     var body: some View {
         VStack(spacing: 24) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("添加 ChatGPT 账号")
+                    Text(existingAccount == nil ? "添加 ChatGPT 账号" : "重新授权 ChatGPT 账号")
                         .font(.title2.weight(.semibold))
                     Text("通过 OpenAI 官方登录授权")
                         .foregroundStyle(.secondary)
@@ -160,11 +181,10 @@ struct AccountLoginView: View {
                     model.cancelForDismissal()
                     dismiss()
                 }
+                .appGlassButton()
             }
 
             ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.08))
                 VStack(spacing: 16) {
                     Image(systemName: stateIcon)
                         .font(.system(size: 42, weight: .medium))
@@ -182,8 +202,9 @@ struct AccountLoginView: View {
                 .padding(28)
             }
             .frame(height: 235)
+            .appGlassPanel(cornerRadius: 24, tint: Color.accentColor.opacity(0.08))
 
-            Label("密码和登录凭据由 Codex 官方登录服务管理，本应用不会读取浏览器 Cookie。每个账号使用独立的本机认证空间。", systemImage: "lock.shield.fill")
+            Label("密码由 Codex 官方登录页处理，本应用不读取浏览器 Cookie。仅保存切换账号所需的凭据，不创建独立的 Codex 对话目录。", systemImage: "lock.shield.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -198,29 +219,32 @@ struct AccountLoginView: View {
                 if model.state == .completed {
                     Spacer()
                     Button("完成") { dismiss() }
-                        .buttonStyle(.borderedProminent)
+                        .appGlassButton(prominent: true)
                 } else if model.state == .waiting || model.state == .openingBrowser || model.state == .cancelling {
                     Button("取消登录") {
                         Task { await model.cancelAndReset() }
                     }
+                    .appGlassButton()
                     .disabled(model.state == .cancelling)
                     Spacer()
                     Button("重新打开浏览器") { model.reopenBrowser() }
-                        .buttonStyle(.borderedProminent)
+                        .appGlassButton(prominent: true)
                         .disabled(model.state != .waiting)
                 } else {
                     Button("关闭") { dismiss() }
+                        .appGlassButton()
                     Spacer()
                     Button(actionTitle) {
                         Task { await model.login(store: store, onSaved: onSaved) }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .appGlassButton(prominent: true)
                     .disabled(model.isPreparing)
                 }
             }
         }
         .padding(24)
         .frame(width: 540, height: 470)
+        .background { AppAmbientBackground() }
         .task { await model.prepare() }
         .onDisappear { model.cancelForDismissal() }
     }

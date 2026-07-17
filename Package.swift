@@ -11,7 +11,7 @@ let package = Package(
         .executableTarget(
             name: "CodexMeter",
             path: "Sources/CodexMeter",
-            resources: [.copy("Resources")],
+            exclude: ["Resources"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]

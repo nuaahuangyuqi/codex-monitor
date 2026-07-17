@@ -1,6 +1,24 @@
 import Foundation
 import SwiftUI
 
+struct CodexAccountResult: Sendable {
+    let email: String?
+    let planType: String
+    let primaryLimit: CodexLimit?
+    let secondaryLimit: CodexLimit?
+    let lifetimeTokens: Int?
+    let peakDailyTokens: Int?
+    let currentStreakDays: Int?
+    let dailyUsage: [(date: Date, tokens: Int)]
+}
+
+struct CodexLimit: Sendable {
+    let name: String
+    let usedPercent: Double
+    let resetsAt: Date?
+    let windowMinutes: Int?
+}
+
 enum SubscriptionTier: String, Codable, CaseIterable, Identifiable, Sendable {
     case free = "Free"
     case plus = "Plus"
@@ -76,6 +94,8 @@ struct AccountSnapshot: Sendable {
     var lifetimeTokens: Int? = nil
     var peakDailyTokens: Int? = nil
     var currentStreakDays: Int? = nil
+    var cycleTokens: Int? = nil
+    var cycleStartedAt: Date? = nil
 
     var requests: Int { points.reduce(0) { $0 + $1.requests } }
     var inputTokens: Int { points.reduce(0) { $0 + $1.inputTokens } }
@@ -88,6 +108,7 @@ extension Array where Element == AccountSnapshot {
     var totalRequests: Int { reduce(0) { $0 + $1.requests } }
     var totalTokens: Int { reduce(0) { $0 + $1.totalTokens } }
     var totalCost: Double { reduce(0) { $0 + $1.cost } }
+    var totalCycleTokens: Int { compactMap(\.cycleTokens).reduce(0, +) }
 }
 
 enum AppPalette {
